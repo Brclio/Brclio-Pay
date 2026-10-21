@@ -1,6 +1,6 @@
 {
   "name": "brclio-pay",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,9 @@
     "test:runtime": "node scripts/runtime-check.mjs",
     "test:security-runtime": "node scripts/admin-runtime-check.mjs && node scripts/registry-runtime-check.mjs && node scripts/store-runtime-check.mjs",
     "client": "node examples/client.mjs",
+    "test:clients": "node --test tests/client-desktop.test.mjs tests/client-android.test.mjs tests/client-release.test.mjs",
+    "build:client:android": "node clients/scripts/build-android.mjs",
+    "audit:clients": "node clients/scripts/release-manifest.mjs",
     "check": "npm run typecheck && npm test && npm run build",
     "ci:verify": "node scripts/build-skill.mjs && node scripts/sync-docs.mjs && npm run check && npm run test:runtime && npm run test:security-runtime",
     "deploy:all": "npm run deploy && npm run deploy:pages && npm run deploy:wechat-gateway && node scripts/deployment-preflight.mjs",

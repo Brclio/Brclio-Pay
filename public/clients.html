@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="下载 Brclio Pay 的 Mac、Windows 与安卓管理客户端。查看订单、账单与接入配置，在线检查客户端更新。">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#fefcf6">
+  <title>客户端 · Brclio Pay</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/clients.css">
+  <script type="module" src="/clients.js"></script>
+</head>
+<body class="clients-page">
+  <!-- Adapted from Brclio Design System template-landing.html and components 1A / 1B. -->
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="site-header container"><a class="wordmark" href="/" aria-label="Brclio Pay 首页"><span>Brclio</span><span class="wordmark-pay">Pay</span></a><nav aria-label="主导航"><a class="quiet-link" href="/admin">打开网页管理 ↗</a></nav></header>
+  <main id="main">
+    <section class="client-hero container" aria-labelledby="client-title">
+      <div><p class="label-caps">YOUR PAYMENT DESK</p><h1 id="client-title">支付管理，<br>就在<span class="highlight">手边。</span></h1><p class="client-description">在 Mac、Windows 或安卓设备上查看订单、支付宝与微信账单，管理项目接入。使用同一个支付后台，延续熟悉的操作。</p><a class="button button-primary" href="#downloads">选择你的设备 ↓</a><p class="client-hero-note">管理员登录 · 数据来自现有支付中心</p></div>
+      <div class="client-desk" aria-label="一个支付中心，连接三个客户端"><span class="desk-caption">A familiar place.</span><div class="desk-title"><span class="desk-monogram">b.</span><span>Brclio Pay<br><small>你的支付工作台</small></span><span aria-hidden="true">↗</span></div><div class="desk-line"><span>01</span><strong>订单与支付状态</strong><span aria-hidden="true">↗</span></div><div class="desk-line"><span>02</span><strong>支付宝 / 微信账单</strong><span aria-hidden="true">↗</span></div><div class="desk-line"><span>03</span><strong>接入与环境说明</strong><span aria-hidden="true">↗</span></div><div class="desk-bottom"><span>Mac · Windows · Android</span><span aria-hidden="true">✳</span></div></div>
+    </section>
+    <section class="downloads-section" id="downloads" aria-labelledby="downloads-title"><div class="container">
+      <div class="downloads-heading"><div><p class="label-caps">CHOOSE YOUR DEVICE</p><h2 id="downloads-title">选一台设备，开始管理。</h2></div><div class="release-state"><p id="releaseState" role="status" aria-live="polite">正在验证发布信息…</p><button id="checkRelease" class="button button-secondary" type="button">重新检查版本</button></div></div>
+      <div class="download-list">
+        <article class="download-row"><span class="download-index" aria-hidden="true">01</span><div class="download-platform"><h3>Mac</h3><p>macOS 13 或更高版本</p></div><div class="download-options"><div><a class="button button-primary download-link" data-platform="darwin-arm64" aria-disabled="true">Apple 芯片 · 等待发布</a><small>M1、M2、M3、M4 等 Apple 芯片</small></div><div><a class="button button-secondary download-link" data-platform="darwin-x64" aria-disabled="true">Intel 芯片 · 等待发布</a><small>关于本机 → 芯片 / 处理器</small></div></div></article>
+        <article class="download-row"><span class="download-index" aria-hidden="true">02</span><div class="download-platform"><h3>Windows</h3><p>Windows 10 / 11 · 64 位</p></div><div class="download-options"><div><a class="button button-primary download-link" data-platform="win32-x64" aria-disabled="true">下载安装程序 · 等待发布</a><small>适用于 Intel / AMD 64 位电脑</small></div></div></article>
+        <article class="download-row"><span class="download-index" aria-hidden="true">03</span><div class="download-platform"><h3>Android</h3><p>Android 8 或更高版本</p></div><div class="download-options"><div><a class="button button-primary download-link" data-platform="android-universal" aria-disabled="true">下载 APK · 等待发布</a><small>通用安装包 · 由系统确认安装权限</small></div></div></article>
+      </div>
+      <p class="download-source">安装包托管于 GitHub Releases。此页面会先验证发布签名，再显示对应版本的下载链接。</p>
+      <details class="release-details" id="releaseDetails" hidden><summary>本次更新内容与文件校验</summary><p id="releaseNotes"></p><div id="releaseHashes" class="release-hashes"></div><a id="releaseLink" class="text-link" rel="noreferrer">在 GitHub 查看完整发布 ↗</a></details>
+    </div></section>
+    <section class="client-update-section" aria-labelledby="client-update-title"><div class="container client-update-layout"><div><p class="label-caps">KEEP YOUR DESK UP TO DATE</p><h2 id="client-update-title">更新有提示，<br>安装由你决定。</h2></div><div><p>客户端提供在线版本检查。发现新版本后，核验发布签名与安装包摘要，再由你确认更新。管理员凭据始终由现有支付中心校验。</p><p class="client-install-note">首次安装时，macOS 或 Windows 可能提示无法验证开发者；请核对下载来源与文件摘要。安卓首次安装 APK 需要允许对应来源安装应用。</p><a class="text-link" href="/admin">也可以直接使用网页版 ↗</a></div></div></section>
+  </main>
+  <footer class="site-footer container"><div><a class="wordmark wordmark-small" href="/"><span>Brclio</span><span class="wordmark-pay">Pay</span></a><p>产品之间，支付相连。</p></div><div class="footer-meta"><span>© Brclio</span><a href="https://bornforthis.cn" rel="noreferrer">bornforthis.cn ↗</a><span class="design-credit">Design · Brclio Design System</span></div></footer>
+  <!-- © Brclio · Brclio/brclio-design-system · CC BY-NC-SA 4.0 -->
+</body>
+</html>

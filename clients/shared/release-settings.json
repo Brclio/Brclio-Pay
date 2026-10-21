@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "productName": "Brclio Pay",
+  "version": "1.0.0",
+  "applicationId": "cn.bornforthis.brcliopay",
+  "repository": "Brclio/Brclio-Pay",
+  "releaseTagPrefix": "client-v",
+  "centerUrl": "https://pay.bornforthis.cn",
+  "updatesUrl": "https://pay.bornforthis.cn/client-update.json",
+  "fallbackUpdatesUrl": "https://github.com/Brclio/Brclio-Pay/releases/latest/download/client-update.json",
+  "minimumMacOS": "13.0",
+  "minimumAndroidSdk": 26
+}

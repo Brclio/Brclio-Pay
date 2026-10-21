@@ -1,0 +1,87 @@
+{
+  "name": "brclio-pay-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Brclio Pay 支付管理客户端",
+  "author": "Brclio",
+  "license": "UNLICENSED",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test ../../tests/client-desktop.test.mjs",
+    "build:mac:arm64": "electron-builder --mac --arm64 --publish never",
+    "build:mac:x64": "electron-builder --mac --x64 --publish never",
+    "build:win": "electron-builder --win --x64 --publish never",
+    "verify:packaged": "node verify-packaged.cjs"
+  },
+  "devDependencies": {
+    "electron": "44.4.3",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "cn.bornforthis.brcliopay",
+    "productName": "Brclio Pay",
+    "directories": {
+      "output": "../../dist-clients"
+    },
+    "files": [
+      "main.cjs",
+      "security.cjs",
+      "update-manager.cjs",
+      "mac-update-helper.cjs",
+      "preload.cjs",
+      "ui/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../shared",
+        "to": "update",
+        "filter": [
+          "release-settings.json",
+          "update-public-key.pem"
+        ]
+      }
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.finance",
+      "minimumSystemVersion": "13.0",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "Brclio-Pay-${version}-mac-${arch}.${ext}",
+      "icon": "../shared/icon.icns"
+    },
+    "dmg": {
+      "title": "Brclio Pay ${version}",
+      "sign": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false,
+      "artifactName": "Brclio-Pay-${version}-windows-${arch}-setup.${ext}",
+      "icon": "../shared/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "toolsets": {
+      "nsis": "1.2.1"
+    }
+  }
+}
