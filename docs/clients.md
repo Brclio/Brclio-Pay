@@ -21,6 +21,8 @@ Mac 的两个架构另各提供同名 `.zip` 更新文件。Windows ARM 设备�
 
 客户端版本独立于 Worker 版本，统一记录在 `clients/shared/release-settings.json`。发布标签格式为 `client-v<版本>`。`1.0.0` 的 Android versionCode 为 `1000000`；计算规则为 `major * 1000000 + minor * 1000 + patch`，各段最多三位且禁止前导零。
 
+后续发版同时更新桌面 `package.json` / lockfile 的版本，以及 Windows 验证流程和 PowerShell 脚本中的正式版本、上一版 fixture 与产物文件名。Android 默认读取共享版本。保留现有 RSA 更新私钥和 Android 发布密钥；每版重新构建并收集对应源码提交和文件摘要的验证证据，不能复用旧版核验记录。
+
 版本入口为 `https://pay.bornforthis.cn/client-update.json`；客户端也可使用共享配置中的 GitHub Release 备用入口。元数据使用下列签名封装：
 
 ```json

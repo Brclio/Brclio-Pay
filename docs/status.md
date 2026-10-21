@@ -1,6 +1,17 @@
 # 统一支付交付状态
 
-核验日期：2026-10-21（Asia/Shanghai）。
+核验日期：2026-10-22（Asia/Shanghai）。
+
+## 1.2.0 管理客户端（客户端版本 1.0.0）
+
+- [GitHub 正式发布 client-v1.0.0](https://github.com/Brclio/Brclio-Pay/releases/tag/client-v1.0.0) 提供 Mac Apple 芯片与 Intel DMG、对应 ZIP 更新包、Windows x64 安装程序和 Android 通用 APK。六个文件及三个元数据文件的远端大小、SHA-256 与本地逐一一致，源码标签为 `839c5a8acc07abe40eeb5b66abfeadad238bd61d`。
+- 下载入口 `/clients`；客户端连接现有管理后台，保留登录、页面缓存与手动刷新。更新清单固定公钥验签，文件核对大小和 SHA-256；安装前再次核验，不内嵌商户、GitHub 或管理员凭据。
+- 550 项项目测试、类型检查与 Worker 打包通过；Android 另通过 9 项 Java 单测、lint、APK 签名与身份核验。源码、原始安装文件和解压 ZIP/APK 内容通过凭据检查。
+- Mac arm64 原生运行和 x64 的 Rosetta 运行通过正式包登录/隔离检查，两 DMG 校验、只读挂载、签名、架构和打包源码比对通过。原样生产更新助手在独立重签测试副本中通过成功替换、60 秒启动超时回滚与配置保留，明确属于 helper fixture 验证。真实后台复制、CSV 和 Skills ZIP 下载、外链确认均通过。
+- Windows 原生运行器完成 NSIS 安装、0.9.9 升至 1.0.0、登录页、运行隔离及配置保留，正式文件摘要与运行证据一致。[Windows 验证运行](https://github.com/Brclio/Brclio-Pay/actions/runs/39638772867)。
+- Android 独立 API 35 模拟器实际完成概览、订单、双渠道账单、环境说明、复制、系统保存器 CSV/ZIP 和刷新验证；系统安装器完成同签名 0.9.9 至 1.0.0 升级，登录与配置保留，系统安装的 APK 与正式文件字节一致。更新候选使用隔离签名 fixture，覆盖损坏拒绝、进程重建、未知来源授权返回及继续安装；不将此项表述为网络下载或所有真机验收。
+- Mac 使用临时签名、尚无 Apple Developer ID 公证；Windows 尚无 Authenticode 商业签名。首次安装可能有系统信任提示。Android 使用固定正式发布证书，后续版本须保留同一签名与更新信任根。
+- 本轮不创建订单、不执行付款、不迁移或修改既有业务配置；Cloudflare 日常发布保留控制台维护的 Text 变量，继续只使用现有私有 GitHub 业务存储。[客户端构建与更新说明](clients.md)。
 
 ## 1.1.1 页面缓存与手动刷新
 
