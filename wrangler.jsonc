@@ -1,0 +1,78 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "brclio-pay-unified",
+  "account_id": "cacceff607775c81f667b7a951d4639f",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "alias": {
+    "node:util": "./src/safe-node-util.ts"
+  },
+  "workers_dev": true,
+  "preview_urls": false,
+  "keep_vars": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/*",
+      "!/styles.css",
+      "!/admin.css",
+      "!/admin.js",
+      "!/checkout.js",
+      "!/landing.js"
+    ]
+  },
+  "vars": {
+    "PAY_BASE_URL": "https://pay.bornforthis.cn",
+    "ALIPAY_APP_ID": "2021007109602288",
+    "PAYMENT_MODE": "live",
+    "PAYMENT_ENABLED": "true",
+    "ALIPAY_CHANNELS": "page,wap",
+    "WECHAT_CHANNELS": "native",
+    "WECHAT_MCH_ID": "1751349372",
+    "WECHAT_APP_ID": "wx59aa532fbf6fa540",
+    "GITHUB_APP_ID": "5411175",
+    "GITHUB_REPOSITORY": "BrclioData/BrclioPay-Data",
+    "GITHUB_BRANCH": "main",
+    "REGISTRY_STORAGE_MODE": "plain",
+    "CLIENTS_JSON": "[]",
+    "LEGACY_WECHAT_BASE_URL": "https://paywc.bornforthis.cn"
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "ratelimits": [
+    {
+      "name": "ADMIN_LOGIN_LIMITER",
+      "namespace_id": "2026102101",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    },
+    {
+      "name": "INTEGRATION_LIMITER",
+      "namespace_id": "2026102102",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "PAYMENT_API_LIMITER",
+      "namespace_id": "2026102103",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    }
+  ],
+  "observability": {
+    "enabled": false
+  }
+}

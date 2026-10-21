@@ -1,0 +1,7 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "brclio-wechatpay",
+  "pages_build_output_dir": "../../dist-pages",
+  "compatibility_date": "2026-10-13",
+  "services": [{"binding":"PAYMENT_BACKEND","service":"brclio-pay-unified"}]
+}

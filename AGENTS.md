@@ -1,0 +1,10 @@
+# Brclio Pay unified maintenance
+
+- Cloudflare account `cacceff607775c81f667b7a951d4639f`, Worker `brclio-pay-unified`, Pages gateway `brclio-pay-aiyuechuang`, domain `pay.bornforthis.cn`. Preserve external DNS and existing merchant credentials.
+- Business data lives only in private `BrclioData/BrclioPay-Data`, as plaintext JSON. Use GitHub App 5411175 installation tokens restricted to this repository. Never introduce D1, KV, R2, Durable Objects, or another business database.
+- Never print or commit private keys, tokens, product secrets, administrator sessions, local backups, or real user/order data in the source repository. Runtime bindings remain server-side; `secrets/` is ignored.
+- Store each order/event separately under Shanghai creation year/month and independent hashed locator files. Store client/grant/plan/audit independently. Preserve original amounts, IDs, timestamps, payment attempts, delivery status and product credentials during migration. Archive old source records and verify source revisions before cutover.
+- Preserve the original Alipay v1 HMAC API. `provider` is immutable per business order; default is Alipay for existing callers. WeChat Native maps `pay_<32hex>` to the provider's 32-character order ID. Never trust browser redirects for payment confirmation.
+- Verify signatures, merchant/application identity, CNY and the exact stored amount; persist payment/outbox atomically, deliver at least once, and require product-side transactional idempotence.
+- Skills: dual, Alipay-only, WeChat-only. Keep downloadable assets and self-contained scoped prompts in sync with API and examples. Temporary grants never convey merchant/GitHub/administrator credentials.
+- Run `npm run check` and relevant Worker runtime tests for payment core changes; migration applies only the exact reviewed plan. Distinguish automated tests, deployed version, domain health, real payment and real product fulfillment evidence.

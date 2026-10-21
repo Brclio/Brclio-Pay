@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#fefcf6">
+  <title>确认订单 · Brclio Pay</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/vendor/qrcode.js" defer></script>
+  <script src="/checkout.js" defer></script>
+</head>
+<body class="checkout-page">
+  <!-- Adapted from Brclio Design System template-app.html. -->
+  <a class="skip-link" href="#main">跳到订单</a>
+  <header class="app-header"><div class="container app-header-inner"><a class="wordmark" href="/" aria-label="Brclio Pay 首页"><span>Brclio</span><span class="wordmark-pay">Pay</span></a><span class="checkout-header-note"><svg width="15" height="17" viewBox="0 0 15 17" fill="none" aria-hidden="true"><path d="M7.5 1.5L13 3.6V8.3C13 11.4 10.8 14.1 7.5 15.5C4.2 14.1 2 11.4 2 8.3V3.6L7.5 1.5Z" stroke="currentColor" stroke-width="1.4"/><path d="M5 8L6.7 9.7L10.3 6.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>支付宝 · 微信支付</span></div></header>
+  <main class="app-content" id="main">
+    <div class="checkout-intro"><p class="label-caps">BRCLIO CHECKOUT</p><h1>确认订单</h1><p>核对订单信息，使用本订单选择的支付方式完成付款。</p></div>
+    <div class="sandbox-notice notice notice-warning" id="sandboxNotice" hidden><strong>沙箱测试环境</strong><span>此订单用于联调测试，不产生真实收款或正式产品权益。</span></div>
+    <div class="notice notice-error" id="errorNotice" role="alert" hidden></div>
+    <div class="checkout-panel" id="checkoutPanel" aria-busy="true">
+      <div class="order-summary">
+        <div class="order-loading" id="loadingState"><div class="loading-line loading-short"></div><div class="loading-line loading-long"></div><div class="loading-line loading-amount"></div><p>正在读取订单信息…</p></div>
+        <div class="order-empty" id="emptyState" hidden><span class="sheet-symbol" aria-hidden="true">b.</span><p>暂时无法显示订单</p><span>请从原产品获取付款链接，<br>或重新连接收银服务。</span></div>
+        <section id="orderDetails" aria-labelledby="orderSubject" hidden>
+          <div class="merchant-line"><span class="merchant-avatar" aria-hidden="true">b.</span><span id="productName">Brclio</span></div>
+          <h2 class="order-subject" id="orderSubject"></h2>
+          <p class="amount-label" id="amountLabel">订单金额</p><p class="order-amount"><span class="currency-symbol">¥</span><span id="orderAmount"></span><span class="currency-code">CNY</span></p>
+          <dl class="order-facts"><div><dt>订单编号</dt><dd><span id="orderId"></span><button class="copy-button" id="copyOrder" type="button" aria-label="复制订单编号">复制</button></dd></div><div><dt>支付方式</dt><dd id="orderProvider"></dd></div><div><dt>有效时间</dt><dd id="orderExpiry"></dd></div></dl>
+          <p class="copy-feedback" id="copyFeedback" role="status"></p>
+        </section>
+      </div>
+      <div class="payment-side">
+        <section class="payment-status" id="statusPanel" aria-live="polite" aria-atomic="true"><span class="status-badge" id="statusBadge">正在连接</span><h2 id="statusTitle">即将为你打开订单</h2><p id="statusCopy">请稍候，收银台正在读取订单的最新状态。</p></section>
+        <div id="paymentOptions" hidden><fieldset class="channel-options"><legend>付款方式</legend><label class="channel-option"><input type="radio" name="channel" value="page" checked><span><strong>电脑网页</strong><small>打开支付宝电脑收银台</small></span></label><label class="channel-option"><input type="radio" name="channel" value="wap"><span><strong>手机网页</strong><small>使用手机浏览器或支付宝</small></span></label><label class="channel-option"><input type="radio" name="channel" value="native"><span><strong>微信扫码</strong><small>使用微信扫一扫付款</small></span></label></fieldset><button class="button button-primary pay-button" id="payButton" type="button">前往支付宝付款 <span aria-hidden="true">↗</span></button></div>
+        <section id="wechatQrPanel" class="wechat-qr-panel" aria-labelledby="wechatQrTitle" hidden><h3 id="wechatQrTitle">使用微信扫一扫</h3><canvas id="wechatQrCanvas" width="224" height="224" role="img" aria-label="本订单的微信付款二维码"></canvas><p id="wechatQrHint">二维码仅在本页生成。请核对微信中显示的商户和金额后付款。</p></section>
+        <div class="checkout-actions"><button class="button button-secondary" id="refreshButton" type="button" hidden>我已付款，刷新状态</button><a class="return-link" id="returnLink" href="/" hidden>返回产品 <span aria-hidden="true">↗</span></a></div>
+        <div id="autoReturnNotice" hidden><p class="poll-note" id="autoReturnCopy" role="status"></p><button class="button button-secondary" id="stayButton" type="button">留在此页</button></div>
+        <p class="poll-note" id="pollNote">支付结果以服务端确认为准。</p>
+      </div>
+    </div>
+    <p class="checkout-help">支付成功后，产品会收到开通通知。若尚未开通，请保留订单编号并返回原产品查看。</p>
+    <noscript><div class="notice notice-error">请启用 JavaScript 后重新打开付款链接，以读取订单和显示付款方式。</div></noscript>
+  </main>
+  <footer class="checkout-footer"><span>© Brclio Pay</span><span class="footer-divider" aria-hidden="true">/</span><span>产品之间，支付相连。</span></footer>
+  <!-- © Brclio · Brclio/brclio-design-system · CC BY-NC-SA 4.0 -->
+</body>
+</html>

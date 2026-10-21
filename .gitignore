@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dist-pages/
+.vercel/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+artifacts/
+public/docs/
+.DS_Store

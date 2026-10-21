@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Brclio 产品的统一收银入口。从产品发起订单，通过支付宝或微信付款，再回到你的产品。">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#fefcf6">
+  <title>Brclio Pay · 产品之间，支付相连</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/landing.js" defer></script>
+</head>
+<body class="landing-page">
+  <!-- Adapted from Brclio Design System template-landing.html. -->
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="site-header container">
+    <a class="wordmark" href="/" aria-label="Brclio Pay 首页"><span>Brclio</span><span class="wordmark-pay">Pay</span></a>
+    <nav aria-label="主导航"><a class="quiet-link" href="/admin">接入管理 <span aria-hidden="true">↗</span></a></nav>
+  </header>
+
+  <main id="main">
+    <section class="hero container" aria-labelledby="hero-title">
+      <div class="hero-text">
+        <p class="label-caps"><span class="small-star" aria-hidden="true">✳</span> BRCLIO PAYMENT SERVICE</p>
+        <h1 id="hero-title">从这里付款，<br>回到你的<span class="highlight">产品。</span></h1>
+        <p class="hero-description">一个收银入口，连接 Brclio 的每一个产品。<br class="desktop-break">从产品发起订单，通过支付宝或微信付款，继续你的使用体验。</p>
+        <p class="service-state" id="serviceState" role="status">正在确认服务状态</p>
+        <div class="hero-actions"><a class="button button-primary" href="/docs/integration.md">查看接入文档 <span aria-hidden="true">↗</span></a><span class="hero-note">购买请从对应产品发起</span></div>
+        <div class="platform-line" aria-label="支持网页、桌面和安卓产品接入"><span>Web</span><span>Desktop</span><span>Android / iOS</span></div>
+      </div>
+      <div class="hero-visual" aria-label="从产品到支付宝或微信，再回到产品的支付流程">
+        <span class="visual-caption">A little connection.</span>
+        <div class="connection-sheet">
+          <div class="sheet-top"><span class="sheet-symbol" aria-hidden="true">b.</span><span class="label-caps">ONE CHECKOUT</span><span class="sheet-mark" aria-hidden="true">↗</span></div>
+          <div class="connection-row"><span class="row-number">01</span><div><span class="row-caption">START WITH YOUR PRODUCT</span><strong>选择你需要的产品</strong></div><span class="row-icon" aria-hidden="true">↗</span></div>
+          <div class="connection-row connection-row-pay"><span class="row-number">02</span><div><span class="row-caption">ALIPAY + WECHAT PAY</span><strong>支付宝 / 微信支付</strong></div><span class="row-icon" aria-hidden="true">支</span></div>
+          <div class="connection-row"><span class="row-number">03</span><div><span class="row-caption">BACK TO WHAT YOU LOVE</span><strong>返回产品，继续使用</strong></div><span class="row-icon" aria-hidden="true">↩</span></div>
+          <div class="sheet-bottom"><span>Brclio Pay</span><span>产品之间，支付相连</span></div>
+        </div>
+        <span class="visual-dot" aria-hidden="true"></span>
+        <svg class="visual-doodle" width="110" height="72" viewBox="0 0 110 72" fill="none" aria-hidden="true"><path d="M6 12C30 5 56 13 69 31C79 45 73 60 61 60C48 60 49 45 62 42C76 39 93 46 103 58M103 58L100 42M103 58L87 60" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </section>
+    <section class="flow-section" aria-labelledby="flow-title">
+      <div class="container flow-layout">
+        <div class="section-header"><span class="section-number">01 / A shared connection</span><h2 id="flow-title">产品各有精彩。<br>收银，只需一次接入。</h2><p>在浏览器中打开收银台，就能连接网页、电脑客户端与安卓应用。</p></div>
+        <ol class="flow-list">
+          <li><span class="step-index">01</span><div><h3>产品创建订单</h3><p>商品、价格和用户身份由产品确认，再生成专属付款链接。</p></div></li>
+          <li><span class="step-index">02</span><div><h3>用户完成付款</h3><p>在收银台核对订单，选择支付宝或微信，完成本订单的付款。</p></div></li>
+          <li><span class="step-index">03</span><div><h3>结果回到产品</h3><p>支付服务核实结果并通知产品，由产品开通对应权益。</p></div></li>
+        </ol>
+      </div>
+    </section>
+    <section class="skill-section container" aria-labelledby="skills-title">
+      <div class="skill-section-heading"><div><p class="label-caps">THREE WAYS TO CONNECT</p><h2 id="skills-title">选一个 Skill，交给项目 AI。</h2></div><p>每份都是完整接入包。搭配管理员签发的单平台受限授权，完成下单、付款通知、权益开通与客户端刷新。</p></div>
+      <div class="skill-downloads">
+        <article class="skill-download"><span class="skill-number" aria-hidden="true">01</span><div><h3>支付宝 + 微信</h3><p>双渠道接入 · 一个订单体系 · 统一结果通知</p></div><a class="button button-primary" href="/api/skills/brclio-pay-integrate.zip" download="brclio-pay-integrate.zip">下载完整 Skill ↓</a></article>
+        <article class="skill-download"><span class="skill-number" aria-hidden="true">02</span><div><h3>仅支付宝</h3><p>电脑网站与手机网站支付 · 保留已有平台功能</p></div><a class="button button-secondary" href="/api/skills/brclio-alipay-integrate.zip" download="brclio-alipay-integrate.zip">下载支付宝 Skill ↓</a></article>
+        <article class="skill-download"><span class="skill-number" aria-hidden="true">03</span><div><h3>仅微信支付</h3><p>Native 扫码收银台 · 网页、桌面与移动客户端</p></div><a class="button button-secondary" href="/api/skills/brclio-wechatpay-integrate.zip" download="brclio-wechatpay-integrate.zip">下载微信 Skill ↓</a></article>
+      </div>
+    </section>
+    <section class="developer-section" aria-labelledby="developer-title">
+      <div class="container developer-layout">
+        <div><p class="label-caps">BUILT TO CONNECT</p><h2 id="developer-title">下一款产品，<br>也可以从这里开始。</h2></div>
+        <div class="developer-copy"><p>接入文档包含订单创建、收银台跳转、付款结果校验与开通通知。可以交给开发者，也可以直接交给你的 AI 开发助手。</p><a class="text-link" href="/docs/integration.md">阅读产品接入指南 <span aria-hidden="true">↗</span></a></div>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer container"><div><a class="wordmark wordmark-small" href="/" aria-label="Brclio Pay 首页"><span>Brclio</span><span class="wordmark-pay">Pay</span></a><p>产品之间，支付相连。</p></div><div class="footer-meta"><span>© Brclio</span><a href="https://bornforthis.cn" rel="noreferrer">bornforthis.cn <span aria-hidden="true">↗</span></a><span class="design-credit">Design · Brclio Design System</span></div></footer>
+  <!-- © Brclio · Brclio/brclio-design-system · CC BY-NC-SA 4.0 -->
+</body>
+</html>

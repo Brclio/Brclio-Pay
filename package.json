@@ -1,0 +1,40 @@
+{
+  "name": "brclio-pay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/sync-docs.mjs && node scripts/build-skill.mjs",
+    "dev": "wrangler dev --local",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prebuild": "node scripts/sync-docs.mjs && node scripts/build-skill.mjs",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "predeploy": "node scripts/sync-docs.mjs && node scripts/build-skill.mjs",
+    "deploy": "wrangler deploy",
+    "build:pages": "node scripts/build-pages.mjs",
+    "deploy:pages": "npm run build:pages && node scripts/deploy-pages.mjs",
+    "test:runtime": "node scripts/runtime-check.mjs",
+    "test:security-runtime": "node scripts/admin-runtime-check.mjs && node scripts/registry-runtime-check.mjs && node scripts/store-runtime-check.mjs",
+    "client": "node examples/client.mjs",
+    "check": "npm run typecheck && npm test && npm run build",
+    "ci:verify": "node scripts/build-skill.mjs && node scripts/sync-docs.mjs && npm run check && npm run test:runtime && npm run test:security-runtime",
+    "deploy:all": "npm run deploy && npm run deploy:pages && npm run deploy:wechat-gateway && node scripts/deployment-preflight.mjs",
+    "test:migration": "node --test tests/migration.test.mjs",
+    "migrate": "node scripts/migrate-data.mjs",
+    "deploy:wechat-gateway": "npm run build:pages && node scripts/deploy-pages.mjs --wechat"
+  },
+  "dependencies": {
+    "alipay-sdk": "4.14.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.4",
+    "wrangler": "latest"
+  },
+  "overrides": {
+    "urllib": "4.9.1"
+  }
+}

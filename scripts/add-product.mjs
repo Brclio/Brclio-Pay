@@ -1,0 +1,12 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {randomBytes} from 'node:crypto';
+const [id,name,webhookUrl,returnOrigin,sku,amount,subject]=process.argv.slice(2);
+if(!id || !/^[a-z0-9][a-z0-9_-]{1,63}$/.test(id) || !name || !subject || !sku || !/^[a-zA-Z0-9_-]{1,80}$/.test(sku) || !/^(?:0|[1-9]\d{0,5})\.\d{2}$/.test(amount || '') || amount==='0.00')throw new Error('Usage: node scripts/add-product.mjs client-id name https-webhook https-return-origin sku 9.90 subject');
+const webhook=new URL(webhookUrl),origin=new URL(returnOrigin);
+if(webhook.protocol!=='https:' || origin.protocol!=='https:' || origin.origin!==returnOrigin || webhook.username || webhook.password || webhook.hash || webhook.search)throw new Error('Use HTTPS webhook and exact HTTPS return origin');
+const path='secrets/clients.json';const clients=JSON.parse(readFileSync(path,'utf8'));
+if(clients.some(c=>c.id===id))throw new Error('Client already exists; edit its local config preserving credentials');
+const client={id,name,apiSecret:randomBytes(32).toString('hex'),webhookSecret:randomBytes(32).toString('hex'),webhookUrl,returnOrigins:[returnOrigin],skus:{[sku]:{subject,amount}}};
+clients.push(client);writeFileSync(path,JSON.stringify(clients,null,2)+'\n',{mode:0o600});
+writeFileSync(`secrets/${id}-product.env`,[`PAY_BASE_URL=https://pay.bornforthis.cn`,`PAY_CLIENT_ID=${id}`,`PAY_API_SECRET=${client.apiSecret}`,`PAY_WEBHOOK_SECRET=${client.webhookSecret}`,''].join('\n'),{mode:0o600,flag:'wx'});
+console.log(`Registered local client ${id}. Import secrets/${id}-product.env into that product's SERVER secrets, then publish updated CLIENTS_JSON. No credentials printed.`);

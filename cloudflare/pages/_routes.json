@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": ["/styles.css", "/admin.css", "/admin.js", "/checkout.js", "/landing.js"]
+}
