@@ -37,6 +37,9 @@ textarea.admin-input { resize: vertical; }
 .admin-page-heading .label-caps { color: var(--blue-deep); font-size: .6rem; margin-bottom: 7px; }
 .admin-page-heading h1 { font: 700 1.2rem/1.5 var(--serif); }
 .admin-page-heading p:last-child { color: var(--ink-faint); font-size: .75rem; margin-top: 6px; }
+.admin-cache-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; margin-bottom: 20px; flex-wrap: wrap; }
+.admin-cache-toolbar .field-hint { flex: 1 1 250px; margin: 0; }
+.admin-cache-toolbar .button { flex-shrink: 0; }
 .admin-panel { background: #fffcf3; border: 1px solid var(--border); border-radius: 10px; }
 .integration-panel { display: grid; grid-template-columns: .95fr 1.2fr; }
 .panel-intro { padding: clamp(24px, 3.5vw, 38px); background: var(--cream-dark); border-right: 1px solid var(--border); }

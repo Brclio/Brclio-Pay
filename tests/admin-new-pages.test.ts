@@ -134,7 +134,7 @@ describe('administrative payment bills', () => {
       if (!call.path.includes('/reports/bills')) return { body: {} };
       const query = new URL(call.path, 'https://pay.example.test').searchParams;
       const result = report(undefined, query); billReads++;
-      if (billReads > 2) {
+      if (billReads > 1) {
         if (failure === 'revision') result.revision = 'b'.repeat(64);
         if (failure === 'cursor') result.nextCursor = 'next-25';
         if (failure === 'count') result.items.pop();

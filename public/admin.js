@@ -32,11 +32,13 @@
     'billsAmount', 'billsCount', 'billsCoverage', 'previousBillsButton', 'nextBillsButton', 'billsPageLabel',
     'environmentPage', 'environmentTitle', 'environmentMessage', 'environmentSource', 'environmentIntro',
     'environmentFilters', 'environmentSearch', 'environmentGroup', 'environmentCount', 'environmentGroups',
-    'environmentEmpty', 'environmentNotes', 'reloadEnvironmentButton',
+    'environmentEmpty', 'environmentNotes', 'reloadEnvironmentButton', 'refreshDataButton', 'cacheStatus',
   ];
   const ui = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
   let session = null;
   let clients = [];
+  let clientsLoaded = false;
+  let grantsLoaded = false;
   let busy = false;
   let grantMode = 'create';
   let editingClient = null;
@@ -73,6 +75,10 @@
   let environmentLoaded = false;
   let environmentGuide = null;
   let environmentStatuses = new Map();
+  // Data stays in this document's memory; never persist it in browser storage.
+  const readCache = new Map(), pendingReads = new Map(), readTimes = new Map();
+  const CACHE_LIMIT = 100, CACHE_BYTES = 4 * 1024 * 1024;
+  let cacheBytes = 0, cacheEpoch = 0, sessionVerifiedAt = 0, sessionCheck = null;
   const pageTitles = {
     overview: ['经营概览', '从已确认付款，了解每个产品的成交。'], orders: ['订单记录', '核对支付与产品通知，查看每一笔订单。'],
     products: ['商品与价格', '调整价格、销售状态和权益说明。'], ai: ['AI 接入', '复制完整任务，让 AI 对接产品与支付中心。'],
@@ -131,6 +137,7 @@
       button.disabled = busy || !!pendingOrderAction || !selectedOrderDetail?.actions[action];
     }
     ui.reloadOrderDetailsButton.disabled = busy || !selectedOrderId || !!pendingOrderAction?.submission;
+    ui.refreshDataButton.disabled = busy || !!pendingOrderAction;
     ui.orderActionForm.setAttribute('aria-busy', String(busy));
     ui.orderActionReason.readOnly = !!pendingOrderAction?.submission;
     ui.orderActionAcknowledged.disabled = busy || !!pendingOrderAction?.submission;
@@ -151,7 +158,76 @@
     }
   }
 
-  async function request(path, { method = 'GET', body } = {}) {
+  function updateCacheStatus() {
+    const at = readTimes.get(activePage);
+    ui.cacheStatus.textContent = at
+      ? `页面缓存 · 本页最近读取于 ${timeLabel(new Date(at))}（北京时间）。外部有变更时，请点击“刷新数据”。`
+      : '数据读取后保存在当前页面，切换与翻页优先复用；点击“刷新数据”获取最新内容。';
+  }
+  function invalidateReadCache() {
+    cacheEpoch++; readCache.clear(); pendingReads.clear(); readTimes.clear(); cacheBytes = 0;
+    clientsLoaded = false; grantsLoaded = false; summaryLoaded = false; ordersLoaded = false;
+    billsLoaded = false; auditLoaded = false; environmentLoaded = false;
+    updateCacheStatus();
+  }
+  function cacheKey(path) {
+    const url = new URL(path, location.origin); url.searchParams.sort();
+    if (url.origin !== location.origin || !['/clients', '/grants', '/audit', '/environment',
+      '/reports/summary', '/reports/orders', '/reports/bills'].includes(url.pathname)) return null;
+    return url.pathname + url.search;
+  }
+  function recordRead(path, at) {
+    const name = path.split('?')[0];
+    const pages = name === '/clients' ? ['products', 'ai', 'platforms']
+      : name === '/grants' || name === '/audit' ? ['platforms']
+      : { '/reports/summary': ['overview'], '/reports/orders': ['orders'], '/reports/bills': ['bills'], '/environment': ['environment'] }[name] || [];
+    pages.forEach(page => readTimes.set(page, at)); updateCacheStatus();
+  }
+  async function ensureSession(force = false) {
+    if (!session || (!force && Date.now() - sessionVerifiedAt < 60000)) return;
+    if (sessionCheck) return sessionCheck;
+    const current = session;
+    const check = (async () => {
+      const data = await networkRequest('/session');
+      if (session !== current) throw new InputError('页面会话已变化，请重新读取。');
+      if (data?.user?.email !== current.user.email || data?.csrfToken !== current.csrfToken) {
+        showLogin('登录会话已变化，请重新确认身份。');
+        throw new ApiError(401, 'ADMIN_LOGIN_REQUIRED', '登录会话已变化，请重新确认身份。');
+      }
+    })();
+    sessionCheck = check;
+    try { await check; } finally { if (sessionCheck === check) sessionCheck = null; }
+  }
+  async function request(path, { method = 'GET', body, fresh = false } = {}) {
+    if (method !== 'GET' || fresh) invalidateReadCache();
+    const key = method === 'GET' && session ? cacheKey(path) : null;
+    if (!key) return networkRequest(path, { method, body });
+    await ensureSession();
+    const cached = readCache.get(key);
+    if (cached) {
+      readCache.delete(key); readCache.set(key, cached); recordRead(key, cached.at);
+      return JSON.parse(cached.text);
+    }
+    if (pendingReads.has(key)) return JSON.parse(await pendingReads.get(key));
+    const epoch = cacheEpoch;
+    const pending = (async () => {
+      const data = await networkRequest(path, { method, body });
+      if (epoch !== cacheEpoch || !session) throw new InputError('页面状态已变化，请重新读取。');
+      const serialized = JSON.stringify(data), size = serialized.length * 2, at = Date.now();
+      if (size <= CACHE_BYTES) {
+        while (readCache.size >= CACHE_LIMIT || cacheBytes + size > CACHE_BYTES) {
+          const oldest = readCache.keys().next().value;
+          cacheBytes -= readCache.get(oldest).size; readCache.delete(oldest);
+        }
+        readCache.set(key, { text: serialized, size, at }); cacheBytes += size;
+      }
+      recordRead(key, at); return serialized;
+    })();
+    pendingReads.set(key, pending);
+    try { return JSON.parse(await pending); }
+    finally { if (pendingReads.get(key) === pending) pendingReads.delete(key); }
+  }
+  async function networkRequest(path, { method = 'GET', body } = {}) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 15000);
     try {
@@ -165,15 +241,21 @@
       const data = response.status === 204 ? {} : await response.json().catch(() => null);
       if (!response.ok) throw new ApiError(response.status, data?.error?.code, data?.error?.message);
       if (data === null) throw new ApiError(502, 'INVALID_RESPONSE', '管理服务暂时没有返回完整结果，请重试。');
+      if (path === '/session') sessionVerifiedAt = Date.now();
       return data;
     } finally { window.clearTimeout(timeout); }
   }
   function report(error, target) {
+    // Loader schema checks run after the JSON read. Never retain a bad 2xx body.
+    if (error instanceof TypeError || error instanceof ApiError && error.status === 502) invalidateReadCache();
+    const changedSnapshot = error instanceof ApiError && error.code === 'REPORTING_SNAPSHOT_CHANGED';
+    if (changedSnapshot) { invalidateReadCache(); clearBills(); }
     if (error instanceof ApiError && error.status === 401 && session) {
       showLogin('会话已过期，请重新登录。');
       return;
     }
-    const text = error instanceof InputError ? error.message
+    const text = changedSnapshot ? '账本已有新变更，请点击顶部“刷新数据”从第一页重新读取，再查看或导出账单。'
+      : error instanceof InputError ? error.message
       : error instanceof ApiError && error.publicMessage ? error.publicMessage
       : error?.name === 'AbortError' ? '请求超时，请稍后重试。'
       : '暂时无法连接管理服务，请检查网络后重试。';
@@ -192,6 +274,7 @@
     ui.outputPanel.hidden = true;
   }
   function showLogin(notice = '') {
+    invalidateReadCache(); sessionVerifiedAt = 0; sessionCheck = null;
     session = null;
     clients = [];
     clearOutput();
@@ -257,18 +340,17 @@
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : undefined,
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : undefined };
   }
-  async function loadClients() {
+  async function loadClients({ fresh = false } = {}) {
     ui.clientsLoading.hidden = false;
-    const result = await request('/clients');
+    const result = await request('/clients', { fresh });
     if (!Array.isArray(result.clients)) throw new ApiError(502, 'INVALID_CLIENTS', '暂时无法读取平台列表。');
     clients = result.clients.map(publicClient);
+    clientsLoaded = true;
     renderClients();
     ui.clientsLoading.hidden = true;
-    try { await loadGrants(); } catch (error) { report(error, ui.grantsMessage); }
-    await loadActiveReport();
   }
-  async function loadGrants() {
-    const result = await request('/grants');
+  async function loadGrants({ fresh = false } = {}) {
+    const result = await request('/grants', { fresh });
     if (!Array.isArray(result.grants)) throw new ApiError(502, 'INVALID_GRANTS', '暂时无法读取短期授权。');
     const grants = result.grants.map((value) => {
       if (!value || typeof value.id !== 'string' || typeof value.clientId !== 'string'
@@ -311,6 +393,7 @@
     ui.grantsList.replaceChildren(...rows);
     ui.grantsEmpty.textContent = '目前没有可显示的短期授权。生成接入任务后，可在这里查看并撤销。';
     ui.grantsEmpty.hidden = grants.length > 0;
+    grantsLoaded = true;
     message(ui.grantsMessage, '');
     syncControls();
   }
@@ -613,18 +696,22 @@
     if (session) document.title = `${pageTitles[activePage][0]} · Brclio Pay`;
     if (updateHash && location.hash !== `#${activePage}`) history.replaceState(null, '', `#${activePage}`);
     ui.coverageNotice.hidden = !currentCoverage || currentCoverage.complete || !['overview', 'orders'].includes(activePage);
+    updateCacheStatus();
   }
   async function loadActiveReport() {
+    await ensureSession();
+    if (activePage !== 'environment' && !clientsLoaded) await loadClients();
     if (activePage === 'overview' && !summaryLoaded) await loadSummary();
     if (activePage === 'orders' && !ordersLoaded) await loadOrders(true);
+    if (activePage === 'platforms' && !grantsLoaded) await loadGrants();
     if (activePage === 'platforms' && !auditLoaded) await loadAudit();
     if (activePage === 'bills' && !billsLoaded) await loadBills(true);
     if (activePage === 'environment' && !environmentLoaded) await loadEnvironment();
   }
-  async function loadAudit() {
+  async function loadAudit({ fresh = false } = {}) {
     message(ui.auditMessage, '正在读取操作记录…');
     try {
-      const result = await request('/audit');
+      const result = await request('/audit', { fresh });
       if (!Array.isArray(result.entries)) throw new ApiError(502, 'INVALID_AUDIT', '操作记录暂时无法读取。');
       const actions = { 'client.created': '注册平台', 'client.updated': '更新平台配置', 'grant.created': '生成短期授权',
         'grant.revoked': '撤销短期授权', 'integration.planned': 'AI 生成变更计划（尚未应用）', 'integration.applied': 'AI 应用平台配置' };
@@ -692,7 +779,10 @@
   }
   function renderTrend(daily, complete) {
     if (!Array.isArray(daily) || daily.length > 31) throw new ApiError(502, 'INVALID_REPORT', '每日统计暂时无法读取。');
-    const max = Math.max(0, ...daily.map((day) => { money(day.paidAmountCents); count(day.paidCount); return day.paidAmountCents; }));
+    const max = Math.max(0, ...daily.map((day) => {
+      if (!day || typeof day !== 'object' || typeof day.date !== 'string') throw new ApiError(502, 'INVALID_REPORT', '每日统计暂时无法读取。');
+      money(day.paidAmountCents); count(day.paidCount); return day.paidAmountCents;
+    }));
     const svg = svgElement('svg', { viewBox: '0 0 820 230', role: 'group', 'aria-label': '每天的成交金额与笔数' });
     svg.append(svgElement('line', { x1: 64, y1: 188, x2: 804, y2: 188, class: 'chart-baseline' }),
       svgElement('text', { x: 54, y: 191, 'text-anchor': 'end', class: 'chart-label' }, '0'),
@@ -716,13 +806,13 @@
     ui.metricAllTimeCount.textContent = '所有已确认付款'; ui.revenueChart.replaceChildren();
     ui.trendSummary.textContent = '请选择筛选条件后查看统计。'; ui.reportMode.textContent = '尚未读取'; summaryLoaded = false;
   }
-  async function loadSummary() {
+  async function loadSummary({ fresh = false } = {}) {
     clearSummaryView();
     message(ui.summaryMessage, '正在读取经营数据…');
     try {
       const month = validMonth(ui.summaryMonth.value), query = new URLSearchParams({ month });
       if (ui.summaryClient.value) query.set('clientId', ui.summaryClient.value);
-      const result = await request(`/reports/summary?${query}`);
+      const result = await request(`/reports/summary?${query}`, { fresh });
       if (!['live', 'sandbox'].includes(result.mode) || !result.allTime) throw new ApiError(502, 'INVALID_REPORT', '经营数据暂时无法读取。');
       ui.metricRevenue.textContent = money(result.paidAmountCents);
       ui.metricPaid.textContent = count(result.paidCount); ui.metricPending.textContent = count(result.pendingCount);
@@ -987,7 +1077,7 @@
         clearBills(); loadedBillFilters = filters; targetPage = 0;
       }
       const result = readBillReport(await request(billQuery(loadedBillFilters, billCursors[targetPage])), loadedBillFilters);
-      if (!reset && result.revision !== billRevision) throw new InputError('账本已有新变更，请点击“查询账单”从第一页重新读取。');
+      if (!reset && result.revision !== billRevision) throw new ApiError(409, 'REPORTING_SNAPSHOT_CHANGED', '请点击“刷新数据”重新读取账单。');
       billRevision = result.revision; billItems = result.items; billNextCursor = result.nextCursor; billPageIndex = targetPage;
       billTotals = { paidCount: result.paidCount, paidAmountCents: result.paidAmountCents }; billsLoaded = true;
       ui.billsAmount.textContent = money(result.paidAmountCents); ui.billsCount.textContent = count(result.paidCount);
@@ -998,33 +1088,33 @@
   async function exportBills() {
     if (!loadedBillFilters || !billsLoaded || !billTotals?.paidCount) return;
     const filters = { ...loadedBillFilters }, seenCursors = new Set(), seenPayments = new Set();
-    const items = []; let cursor = null, expectedRevision = null, expectedCount = null, expectedAmount = null;
+    const items = []; let cursor = null, expectedRevision = billRevision, expectedCount = billTotals.paidCount, expectedAmount = billTotals.paidAmountCents;
     try {
       do {
         const result = readBillReport(await request(billQuery(filters, cursor)), filters);
         if (expectedRevision !== null && (result.revision !== expectedRevision || result.paidCount !== expectedCount || result.paidAmountCents !== expectedAmount)) {
-          throw new InputError('导出期间账本发生变更，请重新导出以获取完整一致的账单。');
+          throw new ApiError(409, 'REPORTING_SNAPSHOT_CHANGED', '导出期间账本发生变更，请点击“刷新数据”后重新导出。');
         }
         expectedRevision = result.revision; expectedCount = result.paidCount; expectedAmount = result.paidAmountCents;
         for (const item of result.items) {
           const identity = `${item.orderId}:${item.kind}:${item.attemptId || ''}:${item.tradeNo}`;
-          if (seenPayments.has(identity)) throw new InputError('账单分页出现重复记录，未生成文件，请重新查询后导出。');
+          if (seenPayments.has(identity)) throw new InputError('账单分页出现重复记录，未生成文件，请点击“刷新数据”后导出。');
           seenPayments.add(identity); items.push(item);
         }
-        if (items.length > expectedCount || (result.nextCursor && !result.items.length)) throw new InputError('账单分页结果与月份汇总不一致，未生成文件，请刷新后重试。');
+        if (items.length > expectedCount || (result.nextCursor && !result.items.length)) throw new InputError('账单分页结果与月份汇总不一致，未生成文件，请点击“刷新数据”后重试。');
         message(ui.billsMessage, `正在读取完整月份账单… 已读取 ${count(items.length)} / ${count(expectedCount)} 笔。`);
         cursor = result.nextCursor;
-        if (cursor && seenCursors.has(cursor)) throw new InputError('账单分页游标重复，未生成文件，请重新查询后导出。');
+        if (cursor && seenCursors.has(cursor)) throw new InputError('账单分页游标重复，未生成文件，请点击“刷新数据”后导出。');
         if (cursor) seenCursors.add(cursor);
       } while (cursor);
       if (items.length !== expectedCount || items.reduce((sum, item) => sum + item.amountCents, 0) !== expectedAmount) {
-        throw new InputError('账单明细与月份汇总不一致，未生成文件，请刷新后重试。');
+        throw new InputError('账单明细与月份汇总不一致，未生成文件，请点击“刷新数据”后重试。');
       }
       const rows = [['支付方式', '付款时间（北京时间）', '产品订单号', '支付订单号', '平台', '商品代码', '商品', '支付平台交易号', '实收金额（元）', '到账类型', '产品通知'],
         ...items.map((item) => [providerLabel(item.provider), orderTime(item.paidAt), item.productOrderId, item.orderId, item.clientId, item.sku, item.subject, item.tradeNo, item.amount, item.kind === 'duplicate' ? '额外到账' : '首次到账', item.fulfillmentStatus === 'delivered' ? '通知已送达' : '通知待送达'])];
       downloadCsv(rows, `brclio-pay-${filters.provider}-${filters.month}${filters.clientId ? `-${filters.clientId}` : ''}.csv`);
       message(ui.billsMessage, `已完整导出 ${filters.month} ${providerLabel(filters.provider)}账单，共 ${count(items.length)} 笔，实收 ${money(expectedAmount)}。`, 'success');
-    } catch (error) { report(error, ui.billsMessage); }
+    } catch (error) { invalidateReadCache(); clearBills(); report(error, ui.billsMessage); }
   }
   function environmentText(value) {
     return typeof value === 'string' ? value : Array.isArray(value) ? value.filter((item) => typeof item === 'string').join('\n') : '';
@@ -1060,13 +1150,13 @@
     ui.environmentGroups.replaceChildren(...sections); ui.environmentEmpty.hidden = visibleCount > 0;
     ui.environmentCount.textContent = `显示 ${count(visibleCount)} 个变量 · 配置状态仅检查是否已提供，维护方式按维护约定显示`;
   }
-  async function loadEnvironment() {
+  async function loadEnvironment({ fresh = false } = {}) {
     environmentLoaded = false; environmentGuide = null; environmentStatuses.clear();
     ui.environmentGroups.replaceChildren(); ui.environmentIntro.replaceChildren(); ui.environmentNotes.replaceChildren();
     ui.environmentSource.textContent = ''; ui.environmentCount.textContent = ''; ui.environmentEmpty.hidden = true;
     message(ui.environmentMessage, '正在从私有数据仓库读取维护说明…');
     try {
-      const result = await request('/environment'), guide = result.document;
+      const result = await request('/environment', { fresh }), guide = result.document;
       if (!guide || guide.schema !== 1 || typeof guide.title !== 'string' || !Number.isFinite(Date.parse(guide.updatedAt))
         || !Array.isArray(guide.intro) || !Array.isArray(guide.notes) || !Array.isArray(guide.groups)
         || !Array.isArray(result.variables) || typeof result.source?.repository !== 'string' || typeof result.source?.path !== 'string'
@@ -1133,7 +1223,7 @@
         message(ui.loginMessage, '');
         const data = await request('/login', { method: 'POST', body: { email: ui.loginEmail.value.trim(), password: ui.loginPassword.value } });
         showDashboard(data);
-        try { await loadClients(); } catch (error) { ui.clientsLoading.hidden = true; report(error, ui.globalMessage); }
+        try { await loadActiveReport(); } catch (error) { ui.clientsLoading.hidden = true; report(error, ui.globalMessage); }
       } catch (error) { ui.loginPassword.value = ''; report(error, ui.loginMessage); }
     });
   });
@@ -1162,13 +1252,13 @@
   ui.clearOutputButton.addEventListener('click', () => { clearOutput(); syncControls(); });
   ui.reloadClientsButton.addEventListener('click', () => {
     void operation(ui.reloadClientsButton, '正在刷新…', async () => {
-      try { message(ui.globalMessage, ''); await loadClients(); }
+      try { message(ui.globalMessage, ''); await loadClients({ fresh: true }); await loadActiveReport(); }
       catch (error) { ui.clientsLoading.hidden = true; report(error, ui.globalMessage); }
     });
   });
   ui.reloadGrantsButton.addEventListener('click', () => {
     void operation(ui.reloadGrantsButton, '正在刷新…', async () => {
-      try { await loadGrants(); } catch (error) { report(error, ui.grantsMessage); }
+      try { await loadGrants({ fresh: true }); } catch (error) { report(error, ui.grantsMessage); }
     });
   });
   ui.newClientButton.addEventListener('click', () => { editingProducts = false; ui.manualSection.classList.remove('products-mode'); ui.platformEditorHost.append(ui.manualSection); resetEditor(); ui.manualSection.open = true; });
@@ -1200,7 +1290,7 @@
     const id = editingClient?.id || ui.clientId.value.trim();
     void operation(ui.reloadCurrentButton, '正在加载最新配置…', async () => {
       try {
-        await loadClients();
+        await loadClients({ fresh: true });
         const latest = clients.find((client) => client.id === id);
         if (!latest) throw new InputError('该平台当前不存在，请重新选择平台或注册新平台。');
         openEditor(latest, editingProducts); message(ui.editMessage, '已加载最新配置，请重新编辑并预览。');
@@ -1209,11 +1299,21 @@
   });
 
   document.querySelectorAll('[data-page-link]').forEach((link) => link.addEventListener('click', (event) => {
-    event.preventDefault(); activatePage(link.dataset.pageLink);
-    if (session) void operation(null, null, loadActiveReport);
+    event.preventDefault(); if (busy) return; activatePage(link.dataset.pageLink);
+    if (session) void operation(null, null, async () => { try { await loadActiveReport(); } catch (error) { report(error, ui.globalMessage); } });
   }));
-  window.addEventListener('hashchange', () => { activatePage(location.hash.slice(1), false); if (session) void operation(null, null, loadActiveReport); });
-  ui.reloadAuditButton.addEventListener('click', () => { void operation(ui.reloadAuditButton, '正在刷新…', loadAudit); });
+  window.addEventListener('hashchange', () => { activatePage(location.hash.slice(1), false); if (session) void operation(null, null, async () => { try { await loadActiveReport(); } catch (error) { report(error, ui.globalMessage); } }); });
+  ui.reloadAuditButton.addEventListener('click', () => { void operation(ui.reloadAuditButton, '正在刷新…', () => loadAudit({ fresh: true })); });
+  ui.refreshDataButton.addEventListener('click', () => {
+    void operation(ui.refreshDataButton, '正在获取最新数据…', async () => {
+      invalidateReadCache();
+      try {
+        message(ui.globalMessage, ''); await ensureSession(true);
+        if (activePage === 'orders') clearOrderDetails();
+        await loadActiveReport();
+      } catch (error) { report(error, ui.globalMessage); }
+    });
+  });
   ui.grantDomainMode.addEventListener('change', syncGrantModes); ui.grantPricingMode.addEventListener('change', syncGrantModes);
   ui.summaryFilters.addEventListener('change', () => { clearSummaryView(); message(ui.summaryMessage, '筛选条件已更改，点击“查看统计”读取对应数据。'); });
   ui.orderFilters.addEventListener('change', () => {
@@ -1244,7 +1344,7 @@
     if (billPageIndex > 0) void operation(ui.previousBillsButton, '正在读取…', () => loadBills(false, billPageIndex - 1));
   });
   ui.exportBillsButton.addEventListener('click', () => { void operation(ui.exportBillsButton, '正在导出完整月份…', exportBills); });
-  ui.reloadEnvironmentButton.addEventListener('click', () => { void operation(ui.reloadEnvironmentButton, '正在读取…', loadEnvironment); });
+  ui.reloadEnvironmentButton.addEventListener('click', () => { void operation(ui.reloadEnvironmentButton, '正在读取…', () => loadEnvironment({ fresh: true })); });
   ui.environmentFilters.addEventListener('submit', (event) => { event.preventDefault(); renderEnvironment(); });
   ui.environmentSearch.addEventListener('input', renderEnvironment);
   ui.environmentGroup.addEventListener('change', renderEnvironment);
@@ -1274,7 +1374,7 @@
       catch { ui.orderCheckoutUrl.focus(); ui.orderCheckoutUrl.select(); ui.orderCheckoutMessage.textContent = '自动复制未完成，请手动复制上方完整链接并重新发送给用户。'; }
     });
   });
-  window.addEventListener('pagehide', clearOrderCheckout);
+  window.addEventListener('pagehide', () => { clearOrderCheckout(); clearOutput(); invalidateReadCache(); });
   ui.rebuildButton.addEventListener('click', () => {
     void operation(ui.rebuildButton, '正在补建本批…', async () => {
       try {
@@ -1303,7 +1403,7 @@
   void operation(null, null, async () => {
     try {
       showDashboard(await request('/session'));
-      try { await loadClients(); } catch (error) { ui.clientsLoading.hidden = true; report(error, ui.globalMessage); }
+      try { await loadActiveReport(); } catch (error) { ui.clientsLoading.hidden = true; report(error, ui.globalMessage); }
     } catch (error) {
       showLogin();
       if (!(error instanceof ApiError && error.status === 401)) report(error, ui.loginMessage);
@@ -1313,8 +1413,12 @@
     if (!event.persisted) return;
     clearOutput(); clearOrderDetails();
     void operation(null, null, async () => {
-      try { showDashboard(await request('/session')); await loadClients(); }
+      try { invalidateReadCache(); showDashboard(await request('/session')); await loadActiveReport(); }
       catch (error) { showLogin('请重新确认登录状态。'); if (!(error instanceof ApiError && error.status === 401)) report(error, ui.loginMessage); }
     });
+  });
+  window.addEventListener('focus', () => {
+    if (!session || busy) return;
+    void operation(null, null, async () => { try { await ensureSession(true); } catch (error) { report(error, ui.globalMessage); } });
   });
 })();
