@@ -20,8 +20,12 @@ node clients/scripts/build-android.mjs --debug
 node clients/scripts/build-android.mjs
 # 构建同包名、同签名的低版本模拟器升级验证种子：
 node clients/scripts/build-android.mjs --seed-version-name=0.9.9 --seed-version-code=999999
+# 真实 Chromium + loopback fixture 页面，使用生产相同 CSP 验证 Blob 导出：
+clients/desktop/node_modules/.bin/electron clients/android/verify-blob-csp.cjs
 ```
 
 四个签名变量是 `ANDROID_SIGNING_STORE_FILE`、`ANDROID_SIGNING_STORE_PASSWORD`、`ANDROID_SIGNING_KEY_ALIAS`、`ANDROID_SIGNING_KEY_PASSWORD`。签名材料只保留在被忽略的 `secrets/`；不要打印或提交。构建脚本先执行 Java 策略测试和 Android lint，再打包并通过 apksigner/aapt 核对身份，导出 `dist-clients/` APK、SHA256 和构建证据。安装与升级验证由独立模拟器流程完成，构建通过不代表已经安装或升级成功。
 
 也支持直接向 Gradle 传入 `-PclientVersionName=0.9.9 -PclientVersionCode=999999`。默认正式版从共享配置取版本；版本覆盖不修改共享文件，不改变包名或签名。验证种子仅用于模拟器，不能作为正式发布资产。原生界面和更新判断始终读取实际安装包的 `BuildConfig` / PackageManager 版本。启动图标由 Gradle 仅从共享 `icon.png` 生成 Android 资源，APK 不包含桌面 ICO/ICNS。
+
+Blob 导出直接读取受限的原始 Blob 引用，不调用被生产 CSP 拦截的 `fetch(blob:)`。引用最多 8 个、合计 32 MiB、单个 16 MiB、保留 120 秒；完成读取、撤销 URL 和页面离开时都会清理。

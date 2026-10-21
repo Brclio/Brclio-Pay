@@ -1,6 +1,6 @@
 'use strict';
 // Executed from a private update directory in Electron's Node mode, after explicit install consent.
-const fs = require('node:fs/promises');
+const fs = (process.versions.electron ? require('original-fs') : require('node:fs')).promises;
 const path = require('node:path');
 const {execFile} = require('node:child_process');
 const {promisify}=require('node:util');

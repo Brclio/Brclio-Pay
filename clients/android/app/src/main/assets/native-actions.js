@@ -2,6 +2,27 @@
   'use strict';
   if (location.origin !== 'https://pay.bornforthis.cn' || window.top !== window || window.__brclioPayNativeReady || !window.BrclioPayNative) return;
   window.__brclioPayNativeReady = true;
+  // Production CSP intentionally disallows fetch(blob:). Retain only bounded, short-lived export objects.
+  const blobs = new Map();
+  const MAX_BLOB_BYTES = 16 * 1024 * 1024, MAX_RETAINED_BYTES = 32 * 1024 * 1024, MAX_BLOB_AGE = 120000;
+  let retainedBytes = 0;
+  function removeBlob(url) {
+    const item = blobs.get(url); if (!item) return;
+    blobs.delete(url); retainedBytes -= item.blob.size; clearTimeout(item.timer);
+  }
+  function clearBlobs() { for (const url of blobs.keys()) removeBlob(url); }
+  const createObjectURL = URL.createObjectURL.bind(URL), revokeObjectURL = URL.revokeObjectURL.bind(URL);
+  URL.createObjectURL = (blob) => {
+    const url = createObjectURL(blob);
+    if (blob instanceof Blob && blob.size > 0 && blob.size <= MAX_BLOB_BYTES && ['text/csv', 'application/zip'].includes(blob.type.split(';')[0])) {
+      while (blobs.size && (blobs.size >= 8 || retainedBytes + blob.size > MAX_RETAINED_BYTES)) removeBlob(blobs.keys().next().value);
+      const timer = setTimeout(() => removeBlob(url), MAX_BLOB_AGE);
+      blobs.set(url, { blob, timer }); retainedBytes += blob.size;
+    }
+    return url;
+  };
+  URL.revokeObjectURL = (url) => { removeBlob(String(url)); revokeObjectURL(url); };
+  window.addEventListener('pagehide', clearBlobs);
   const pending = new Map();
   let sequence = 0;
   const send = (action, body) => new Promise((resolve, reject) => {
@@ -24,7 +45,9 @@
     if (exporting) throw new Error('请先完成当前导出');
     exporting = true;
     try {
-      const response = await fetch(link.href); const blob = await response.blob();
+      const blob = blobs.get(link.href)?.blob;
+      if (!blob) throw new Error('导出已过期或文件超过 16 MiB，请重新点击导出');
+      removeBlob(link.href);
       const mime = blob.type.split(';')[0];
       if (!['text/csv', 'application/zip'].includes(mime) || !blob.size || blob.size > 16 * 1024 * 1024) throw new Error('导出格式无效或文件超过 16 MiB');
       const transfer = `e${Date.now()}_${++sequence}`;
