@@ -215,7 +215,7 @@ select.admin-input { appearance: auto; cursor: pointer; }
 .order-identity { max-width: 280px; overflow-wrap: anywhere; }
 .order-identity strong { display: block; font-size: .75rem; font-weight: 500; margin-bottom: 7px; }
 .order-identity > span { color: var(--ink-faint); font-size: .6rem; line-height: 1.7; }
-.order-amount { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--blue-deep); font-weight: 500; }
+.orders-table .order-amount { font: 500 .78rem/1.7 var(--sans); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--blue-deep); }
 .order-dates { min-width: 173px; font-size: .62rem; color: var(--ink-light); line-height: 1.8; }
 .paid-status { background: var(--yellow-soft); color: #6c5500; }
 .orders-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 18px; margin-top: 22px; }
