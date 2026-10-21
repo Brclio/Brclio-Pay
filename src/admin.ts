@@ -3,11 +3,12 @@ import {clients,HttpError,requireThat} from './config';
 import {jsonBody} from './http';
 import {Registry,type ClientConfig} from './registry';
 import {makeIntegrationPrompt,skillMarkdown,skillZip,type SkillVariant} from './skill';
-import type {Env,Store} from './types';
+import type {Env,PaymentProvider,Store} from './types';
 import {Reporting,type OrderStatus} from './reporting';
 import {Payments,type AdminOrderAction,type OrderActionInput} from './payments';
 import {createAlipay} from './alipay';
 import {hmacSha256} from './crypto';
+import {environmentGuide} from './environment';
 
 export interface AdminPaymentOptions {
   service?:()=>Promise<Payments>;
@@ -25,7 +26,7 @@ function reportQuery(url:URL,keys:string[]):Record<string,string> {
 
 export async function handleAdmin(request:Request,env:Env,store:Store,paymentOptions:AdminPaymentOptions={}):Promise<Response> {
   const url=new URL(request.url);const {pathname,search}=url;
-  const reportRead=request.method==='GET' && ['/api/admin/reports/summary','/api/admin/reports/orders'].includes(pathname);
+  const reportRead=request.method==='GET' && ['/api/admin/reports/summary','/api/admin/reports/orders','/api/admin/reports/bills'].includes(pathname);
   const skillRead=request.method==='GET' && ['/api/admin/skill','/api/admin/skill.zip'].includes(pathname);
   const variant=(url.searchParams.get('variant')||'brclio-pay-integrate') as SkillVariant;
   if(skillRead)requireThat(['brclio-pay-integrate','brclio-alipay-integrate','brclio-wechatpay-integrate'].includes(variant)&&[...url.searchParams.keys()].every(k=>k==='variant'),400,'INVALID_SKILL','Skill 类型无效');
@@ -36,6 +37,10 @@ export async function handleAdmin(request:Request,env:Env,store:Store,paymentOpt
   }
   const identity=adminSession(request,env);
   if(request.method!=='GET')requireAdminMutation(request,env,identity);
+  if(pathname==='/api/admin/environment') {
+    requireThat(request.method==='GET',405,'METHOD_NOT_ALLOWED','请求方法不支持');
+    return Response.json(await environmentGuide(env,store));
+  }
   if(pathname==='/api/admin/session' && request.method==='GET')return Response.json({user:{email:identity.email},csrfToken:identity.csrfToken});
   if(pathname==='/api/admin/logout' && request.method==='POST')return adminLogout();
   if(pathname==='/api/admin/skill' && request.method==='GET')return Response.json({content:skillMarkdown(variant)});
@@ -82,9 +87,15 @@ export async function handleAdmin(request:Request,env:Env,store:Store,paymentOpt
       const month=query.month || new Date(Date.now()+8*3600000).toISOString().slice(0,7);
       return Response.json(await reporting.summary({month,...(query.clientId?{clientId:query.clientId}:{})}));
     }
-    const query=reportQuery(url,['month','clientId','status','limit','cursor']);
+    if(pathname==='/api/admin/reports/bills') {
+      const query=reportQuery(url,['provider','month','clientId','limit','cursor']);
+      requireThat(query.limit===undefined || /^\d{1,2}$/.test(query.limit),400,'INVALID_LIMIT','每页数量格式错误');
+      return Response.json(await reporting.bills({provider:query.provider as PaymentProvider,month:query.month,
+        ...(query.clientId!==undefined?{clientId:query.clientId}:{}),...(query.limit!==undefined?{limit:Number(query.limit)}:{}),...(query.cursor!==undefined?{cursor:query.cursor}:{})}));
+    }
+    const query=reportQuery(url,['month','clientId','provider','status','limit','cursor']);
     requireThat(query.limit===undefined || /^\d{1,2}$/.test(query.limit),400,'INVALID_LIMIT','每页数量格式错误');
-    return Response.json(await reporting.orders({...(query.month?{month:query.month}:{}),...(query.clientId?{clientId:query.clientId}:{}),...(query.status?{status:query.status as OrderStatus}:{}),...(query.limit?{limit:Number(query.limit)}:{}),...(query.cursor?{cursor:query.cursor}:{})}));
+    return Response.json(await reporting.orders({...(query.month?{month:query.month}:{}),...(query.clientId?{clientId:query.clientId}:{}),...(query.provider!==undefined?{provider:query.provider as PaymentProvider}:{}),...(query.status?{status:query.status as OrderStatus}:{}),...(query.limit?{limit:Number(query.limit)}:{}),...(query.cursor?{cursor:query.cursor}:{})}));
   }
   if(pathname==='/api/admin/reports/rebuild' && request.method==='POST') {
     const body=await jsonBody(request,4096) as {limit?:number;cursor?:string};

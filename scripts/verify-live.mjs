@@ -5,6 +5,7 @@ import {installationGithub,TARGET_REPOSITORY} from './migrate-data.mjs';
 const base=process.argv[2]||'https://brclio-pay-unified.aiyuechuang.workers.dev';
 const url=new URL(base);if(url.protocol!=='https:'||url.pathname!=='/'||url.search||url.hash)throw Error('Invalid HTTPS origin');
 const env={...JSON.parse(await readFile('secrets/runtime-vars.json','utf8')),...JSON.parse(await readFile('wrangler.jsonc','utf8')).vars};
+const manifest=JSON.parse(await readFile('package.json','utf8'));
 const dispatcher=process.env.HTTPS_PROXY?new ProxyAgent(process.env.HTTPS_PROXY):undefined;
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const hmac=(secret,value)=>createHmac('sha256',secret).update(value).digest('hex');
@@ -16,7 +17,7 @@ try{
  const load=async file=>JSON.parse((await github.bytes(TARGET_REPOSITORY,file)).toString());
  const clients=await Promise.all(snapshot.files.filter(f=>/^registry\/clients\/[^/]+\.json$/.test(f.path)).map(load));
  const orders=await Promise.all(snapshot.files.filter(f=>/^orders\/\d{4}\/\d{2}\/pay_[a-f0-9]{32}\.json$/.test(f.path)).map(load));
- const health=(await request('/api/health')).json();assert(health.version==='1.0.0'&&health.ready&&health.acceptingPayments&&health.providers.wechat.configured,'HEALTH_FAILED');
+ const health=(await request('/api/health')).json();assert(health.version===manifest.version&&health.ready&&health.acceptingPayments&&health.providers.wechat.configured,'HEALTH_FAILED');
  const seconds=Math.floor(Date.now()/1000),payload={sub:hash(env.ADMIN_EMAIL.trim().toLowerCase()),iat:seconds,exp:seconds+8*3600,csrf:hash(randomBytes(32)),credential:hash(env.ADMIN_PASSWORD_HASH)};
  const encoded=Buffer.from(JSON.stringify(payload)).toString('base64url');const headers={Cookie:'__Host-brclio_admin='+encoded+'.'+hmac(env.ADMIN_SESSION_SECRET,'admin-session-v1:'+encoded)};
  let historicalClientMissing=0;

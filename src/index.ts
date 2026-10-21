@@ -90,7 +90,7 @@ export async function handle(request:Request,env:Env,ctx:ExecutionContext,provid
       const key=hmacSha256(env.CHECKOUT_SECRET || 'unconfigured',JSON.stringify([env.GITHUB_REPOSITORY,env.PAYMENT_ENABLED,env.CLIENTS_JSON,env.REGISTRY_ENCRYPTION_KEY]));
       if(healthCache?.key===key && healthCache.until>Date.now())return secure(json(healthCache.value));
       let ready=false;try{const effective=await runtimeEnv(env,provided?.store);ready=configurationReady(effective);if(ready&&effective.WECHAT_CHANNELS?.split(',').includes('native'))createWechat(effective);}catch{ready=false;/* report availability only */}
-      const value={service:'Brclio Pay',version:'1.0.0',ready,acceptingPayments:ready && env.PAYMENT_ENABLED==='true',mode:env.PAYMENT_MODE || 'live',providers:{alipay:{configured:!!(env.ALIPAY_PRIVATE_KEY&&env.ALIPAY_PUBLIC_KEY),channels:env.ALIPAY_CHANNELS?.split(',')||[]},wechat:{configured:!!(env.WECHAT_PRIVATE_KEY&&env.WECHAT_API_V3_KEY&&env.WECHAT_PUBLIC_KEYS_JSON),channels:env.WECHAT_CHANNELS?.split(',')||[]}},storage:'github-private-plaintext'};
+      const value={service:'Brclio Pay',version:'1.1.0',ready,acceptingPayments:ready && env.PAYMENT_ENABLED==='true',mode:env.PAYMENT_MODE || 'live',providers:{alipay:{configured:!!(env.ALIPAY_PRIVATE_KEY&&env.ALIPAY_PUBLIC_KEY),channels:env.ALIPAY_CHANNELS?.split(',')||[]},wechat:{configured:!!(env.WECHAT_PRIVATE_KEY&&env.WECHAT_API_V3_KEY&&env.WECHAT_PUBLIC_KEYS_JSON),channels:env.WECHAT_CHANNELS?.split(',')||[]}},storage:'github-private-plaintext'};
       healthCache={key,until:Date.now()+15000,value};return secure(json(value));
     }
     if(path.startsWith('/api/admin/'))return secure(await handleAdmin(request,env,provided?.store || storeFor(env),{

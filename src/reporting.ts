@@ -1,7 +1,7 @@
 import {Buffer} from 'node:buffer';
 import {requireThat} from './config';
 import {sha256} from './crypto';
-import type {Order,Store,StoreSnapshot,Transaction} from './types';
+import type {Order,PaymentProvider,Store,StoreSnapshot,Transaction} from './types';
 
 export type PaymentMode = Order['mode'];
 export type OrderStatus = Order['status'];
@@ -21,8 +21,19 @@ export interface ReportingSummary {
   paidAmountCents:number; paidCount:number; pendingCount:number; closedCount:number; deliveryPendingCount:number;
   allTime:{paidAmountCents:number;paidCount:number}; daily:DailyRevenue[]; coverage:Coverage;
 }
-export interface OrderFilters {month?:string; clientId?:string; status?:OrderStatus; limit?:number; cursor?:string}
+export interface OrderFilters {month?:string; clientId?:string; provider?:PaymentProvider; status?:OrderStatus; limit?:number; cursor?:string}
 export interface OrderPage {mode:PaymentMode;items:ReportingOrder[];nextCursor:string|null;coverage:Coverage}
+export interface Bill {
+  orderId:string;attemptId:string;provider:PaymentProvider;clientId:string;productOrderId:string;sku:string;subject:string;
+  tradeNo:string;paidAt:string;amount:string;amountCents:number;currency:'CNY';kind:'primary'|'duplicate';
+  fulfillmentStatus:Order['fulfillmentStatus'];
+}
+export interface BillFilters {provider:PaymentProvider;month:string;clientId?:string;limit?:number;cursor?:string}
+export interface BillCoverage {scope:'ledger';source:'canonical';complete:true;sourceOrders:number;scannedOrders:number;checkedAt:string}
+export interface BillPage {
+  mode:PaymentMode;provider:PaymentProvider;month:string;clientId?:string;currency:'CNY';basis:'payment-confirmed';timezone:'Asia/Shanghai';
+  paidCount:number;paidAmountCents:number;items:Bill[];nextCursor:string|null;coverage:BillCoverage;revision:string;
+}
 export interface RebuildResult {processed:number;scanned:number;nextCursor:string|null;coverage:Coverage}
 interface Metrics {paidAmountCents:number;paidCount:number;pendingCount:number;closedCount:number;deliveryPendingCount:number}
 interface MonthBucket extends Metrics {schema:1;mode:PaymentMode;month:string;daily:Record<string,{paidAmountCents:number;paidCount:number}>}
@@ -38,12 +49,14 @@ function integrity(condition:unknown):asserts condition {requireThat(condition,5
 function validMode(mode:unknown):asserts mode is PaymentMode {integrity(mode==='live'||mode==='sandbox');}
 function monthValue(value:unknown):asserts value is string {requireThat(typeof value==='string'&&/^[2-9]\d{3}-(?:0[1-9]|1[0-2])$/.test(value),400,'INVALID_MONTH','月份格式应为 YYYY-MM');}
 function clientValue(value:unknown):asserts value is string {requireThat(typeof value==='string'&&/^[a-z0-9][a-z0-9_-]{1,63}$/.test(value),400,'INVALID_CLIENT_ID','平台 ID 格式错误');}
+function providerValue(value:unknown):asserts value is PaymentProvider {requireThat(value==='alipay'||value==='wechat',400,'INVALID_PROVIDER','支付渠道应为 alipay 或 wechat');}
 function time(value:string):number {const valueMs=Date.parse(value);integrity(Number.isFinite(valueMs));return valueMs;}
 function shanghaiDay(value:string):string {return new Date(time(value)+8*3600_000).toISOString().slice(0,10);}
 function cents(amount:string):number {integrity(typeof amount==='string'&&/^(?:0|[1-9]\d{0,5})\.\d{2}$/.test(amount)&&amount!=='0.00');const [yuan,fen]=amount.split('.');return Number(yuan)*100+Number(fen);}
 function checkedAdd(value:number,delta:number):number {const sum=value+delta;integrity(Number.isSafeInteger(value)&&Number.isSafeInteger(delta)&&Number.isSafeInteger(sum)&&sum>=0);return sum;}
 function orderView(order:Omit<Order,'requestHash'|'returnUrl'>):ReportingOrder {
   integrity(/^pay_[a-f0-9]{32}$/.test(order.id));validMode(order.mode);clientValue(order.clientId);
+  integrity(order.provider===undefined||order.provider==='alipay'||order.provider==='wechat');
   integrity(['PENDING','PAID','CLOSED'].includes(order.status)&&['pending','delivered'].includes(order.fulfillmentStatus));
   time(order.createdAt);time(order.expiresAt);
   integrity(typeof order.productOrderId==='string'&&typeof order.sku==='string'&&typeof order.subject==='string');
@@ -113,7 +126,7 @@ export async function indexOrder(tx:Transaction,order:Order):Promise<boolean> {
   if(stored){
     integrity(stored.schema===1&&stored.order);before=orderView(stored.order);
     integrity(before.amountCents===stored.order.amountCents);
-    integrity(before.id===after.id&&before.mode===after.mode&&before.clientId===after.clientId&&before.createdAt===after.createdAt&&before.amount===after.amount&&before.amountCents===after.amountCents
+    integrity(before.id===after.id&&before.mode===after.mode&&before.provider===after.provider&&before.clientId===after.clientId&&before.createdAt===after.createdAt&&before.amount===after.amount&&before.amountCents===after.amountCents
       &&before.productOrderId===after.productOrderId&&before.sku===after.sku&&before.subject===after.subject);
     for(const payment of before.duplicatePayments??[])integrity((after.duplicatePayments??[]).some(next=>next.tradeNo===payment.tradeNo&&next.attemptId===payment.attemptId&&next.amount===payment.amount&&next.paidAt===payment.paidAt));
     if(JSON.stringify(before)===JSON.stringify(after))return false;
@@ -160,6 +173,16 @@ function decodeCursor(value:string|undefined,kind:string,filter:string,prefix:st
   requireThat(data&&data.v===1&&data.k===kind&&data.f===sha256(filter)&&typeof data.a==='string'&&data.a.startsWith(prefix)&&data.a.endsWith('.json')&&!data.a.includes('..')&&data.a.length<=240,400,'INVALID_CURSOR','分页游标与筛选条件不匹配');
   return data.a;
 }
+function billKey(bill:Bill):string {return `${new Date(time(bill.paidAt)).toISOString()}_${bill.orderId}_${bill.attemptId}_${bill.tradeNo}`;}
+function billCursor(value:string|undefined,filter:string,revision:string):string|null {
+  if(value===undefined)return null;
+  let data:{v?:unknown;k?:unknown;f?:unknown;r?:unknown;a?:unknown}|undefined;
+  try {if(value.length>1024||!/^[A-Za-z0-9_-]+$/.test(value))throw Error();data=JSON.parse(Buffer.from(value,'base64url').toString('utf8'));}catch{requireThat(false,400,'INVALID_CURSOR','账单分页游标无效');}
+  requireThat(data&&data.v===1&&data.k==='bills'&&data.f===sha256(filter)&&typeof data.r==='string'&&typeof data.a==='string'
+    &&/^\d{4}-\d{2}-\d{2}T[\d:.]+Z_pay_[a-f0-9]{32}_pay_[a-f0-9]{32}_\d{10,64}$/.test(data.a),400,'INVALID_CURSOR','账单分页游标与筛选条件不匹配');
+  requireThat(data.r===revision,409,'REPORTING_SNAPSHOT_CHANGED','账本已更新，请从第一页重新查询或导出账单');
+  return data.a;
+}
 /** Counters represent confirmed payment amounts, NOT net Alipay settlement or
  * revenue after refunds. Index coverage is conservative across this whole ledger.
  * GitHub listings are immutable and capped at 20k per prefix; order pages scan at
@@ -180,9 +203,10 @@ export class Reporting {
   }
   async orders(input:OrderFilters={}):Promise<OrderPage>{
     if(input.month!==undefined)monthValue(input.month);if(input.clientId!==undefined)clientValue(input.clientId);
+    if(input.provider!==undefined)providerValue(input.provider);
     requireThat(input.status===undefined||['PENDING','PAID','CLOSED'].includes(input.status),400,'INVALID_STATUS','订单状态无效');
     const limit=input.limit??20;requireThat(Number.isInteger(limit)&&limit>=1&&limit<=REPORTING_LIMITS.orders,400,'INVALID_LIMIT','每页最多 25 笔订单');
-    const filter=JSON.stringify({mode:this.mode,month:input.month??null,clientId:input.clientId??null,status:input.status??null});
+    const filter=JSON.stringify({mode:this.mode,month:input.month??null,clientId:input.clientId??null,status:input.status??null,...(input.provider?{provider:input.provider}:{})});
     const prefix=ORDER_PREFIX+this.mode+'/',after=decodeCursor(input.cursor,'orders',filter,prefix),snapshot=await this.snapshot();
     const paths=snapshot.listJsonPaths(prefix).filter(path=>(!input.month||path.startsWith(prefix+input.month+'/'))&&(!after||path<after)).sort().reverse();
     const items:ReportingOrder[]=[];let scanned=0,last:string|null=null;
@@ -190,9 +214,51 @@ export class Reporting {
       if(scanned>=MAX_SCAN||items.length>=limit)break;
       scanned++;last=path;const indexed=await snapshot.readJson<IndexedOrder>(path);integrity(indexed?.schema===1&&indexed.order&&indexed.order.mode===this.mode&&indexPath(indexed.order)===path);
       const order=orderView(indexed.order);integrity(order.amountCents===indexed.order.amountCents);
-      if((!input.clientId||order.clientId===input.clientId)&&(!input.status||order.status===input.status))items.push(order);
+      if((!input.clientId||order.clientId===input.clientId)&&(!input.status||order.status===input.status)&&(!input.provider||order.provider===input.provider))items.push(order);
     }
     return {mode:this.mode,items,nextCursor:last&&scanned<paths.length?encodeCursor('orders',filter,last):null,coverage:coverage(snapshot,this.now())};
+  }
+  /** Read-only receipt ledger. The complete immutable canonical snapshot is read
+   * so missing/creation-month indexes cannot hide late payments or additional
+   * verified receipts. Amounts are confirmed gross CNY receipts, not settlements.
+   * Listing/canonical errors fail the whole response instead of returning a
+   * partial total. Cursor revisions prevent mixed-snapshot exports. */
+  async bills(input:BillFilters):Promise<BillPage>{
+    providerValue(input.provider);monthValue(input.month);if(input.clientId!==undefined)clientValue(input.clientId);
+    const limit=input.limit??20;requireThat(Number.isInteger(limit)&&limit>=1&&limit<=REPORTING_LIMITS.orders,400,'INVALID_LIMIT','每页最多 25 笔账单');
+    const filter=JSON.stringify({mode:this.mode,provider:input.provider,month:input.month,clientId:input.clientId??null});
+    const snapshot=await this.snapshot(),after=billCursor(input.cursor,filter,snapshot.revision),paths=sourcePaths(snapshot);
+    requireThat(paths.length<=REPORTING_LIMITS.listing,503,'REPORTING_CAPACITY','账单数量超出完整读取范围，请先归档历史账本');
+    integrity(new Set(paths).size===paths.length);
+    const items:Bill[]=[];
+    // Keep GitHub concurrency bounded while still scanning every canonical row.
+    for(let offset=0;offset<paths.length;offset+=8){
+      const batch=paths.slice(offset,offset+8);
+      const orders=await Promise.all(batch.map(async path=>{
+        const original=await snapshot.readJson<Order>(path);integrity(original&&original.id===orderIdFromPath(path));
+        return {original,order:orderView(original)};
+      }));
+      for(const {original,order} of orders){
+        if(order.mode!==this.mode||order.provider!==input.provider||order.status!=='PAID'||(input.clientId&&order.clientId!==input.clientId))continue;
+        integrity(/^\d{10,64}$/.test(order.tradeNo!));
+        const primaryAttempt=original.paymentAttempts?.find(attempt=>attempt.tradeNo===order.tradeNo)?.id??order.id;
+        integrity(/^pay_[a-f0-9]{32}$/.test(primaryAttempt));
+        const receipts=[{attemptId:primaryAttempt,tradeNo:order.tradeNo!,paidAt:order.paidAt!,amount:order.amount,kind:'primary' as const},
+          ...(order.duplicatePayments??[]).map(payment=>({...payment,kind:'duplicate' as const}))];
+        for(const receipt of receipts){
+          if(shanghaiDay(receipt.paidAt).slice(0,7)!==input.month)continue;
+          items.push({orderId:order.id,attemptId:receipt.attemptId,provider:input.provider,clientId:order.clientId,productOrderId:order.productOrderId,
+            sku:order.sku,subject:order.subject,tradeNo:receipt.tradeNo,paidAt:receipt.paidAt,amount:receipt.amount,amountCents:cents(receipt.amount),currency:'CNY',
+            kind:receipt.kind,fulfillmentStatus:order.fulfillmentStatus});
+        }
+      }
+    }
+    items.sort((a,b)=>billKey(a)<billKey(b)?1:billKey(a)>billKey(b)?-1:0);
+    const paidAmountCents=items.reduce((total,item)=>checkedAdd(total,item.amountCents),0),remaining=after?items.filter(item=>billKey(item)<after):items,page=remaining.slice(0,limit);
+    const last=page.at(-1),nextCursor=last&&remaining.length>page.length?Buffer.from(JSON.stringify({v:1,k:'bills',f:sha256(filter),r:snapshot.revision,a:billKey(last)})).toString('base64url'):null;
+    return {mode:this.mode,provider:input.provider,month:input.month,...(input.clientId?{clientId:input.clientId}:{}),currency:'CNY',basis:'payment-confirmed',timezone:'Asia/Shanghai',
+      paidCount:items.length,paidAmountCents,items:page,nextCursor,revision:snapshot.revision,
+      coverage:{scope:'ledger',source:'canonical',complete:true,sourceOrders:paths.length,scannedOrders:paths.length,checkedAt:new Date(this.now()).toISOString()}};
   }
   /** Administrator route MUST authenticate and require CSRF before calling.
    * Scans all legacy modes only to rebuild reporting; never calls a gateway,

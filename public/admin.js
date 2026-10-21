@@ -27,6 +27,12 @@
     'orderAttemptsSection', 'orderAttemptsList', 'orderAuditList', 'orderAuditEmpty',
     'productAiButton', 'productEditorHost', 'platformEditorHost', 'grantDomainMode', 'grantPricingMode',
     'grantOriginsLabel', 'grantOriginsHint', 'grantPricingHint', 'reloadAuditButton', 'auditMessage', 'auditEmpty', 'auditList',
+    'billsPage', 'billsAlipayButton', 'billsWechatButton', 'billsFilters', 'billsMonth', 'billsClient',
+    'searchBillsButton', 'exportBillsButton', 'billsMessage', 'billsRows', 'billsEmpty', 'billsAmountLabel',
+    'billsAmount', 'billsCount', 'billsCoverage', 'previousBillsButton', 'nextBillsButton', 'billsPageLabel',
+    'environmentPage', 'environmentTitle', 'environmentMessage', 'environmentSource', 'environmentIntro',
+    'environmentFilters', 'environmentSearch', 'environmentGroup', 'environmentCount', 'environmentGroups',
+    'environmentEmpty', 'environmentNotes', 'reloadEnvironmentButton',
   ];
   const ui = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
   let session = null;
@@ -55,10 +61,24 @@
   let selectedOrderDetail = null;
   let pendingOrderAction = null;
   let orderCheckoutTimer = null;
+  let billsProvider = 'alipay';
+  let billsLoaded = false;
+  let billItems = [];
+  let billNextCursor = null;
+  let billCursors = [null];
+  let billPageIndex = 0;
+  let loadedBillFilters = null;
+  let billRevision = null;
+  let billTotals = null;
+  let environmentLoaded = false;
+  let environmentGuide = null;
+  let environmentStatuses = new Map();
   const pageTitles = {
     overview: ['经营概览', '从已确认付款，了解每个产品的成交。'], orders: ['订单记录', '核对支付与产品通知，查看每一笔订单。'],
     products: ['商品与价格', '调整价格、销售状态和权益说明。'], ai: ['AI 接入', '复制完整任务，让 AI 对接产品与支付中心。'],
     platforms: ['平台与授权', '管理回调、返回域名和单平台短期授权。'],
+    bills: ['支付账单', '分别查看支付宝、微信每月确认到账与产品通知。'],
+    environment: ['环境变量', '从私有数据仓库读取维护说明，核对当前配置状态。'],
   };
 
   const skillLabels = { 'brclio-pay-integrate': '支付宝 + 微信', 'brclio-alipay-integrate': '仅支付宝', 'brclio-wechatpay-integrate': '仅微信' };
@@ -102,6 +122,9 @@
     ui.exportOrdersButton.disabled = busy || orderItems.length === 0;
     ui.previousOrdersButton.disabled = busy || orderPageIndex === 0;
     ui.nextOrdersButton.disabled = busy || !orderNextCursor;
+    ui.exportBillsButton.disabled = busy || !billsLoaded || !billTotals?.paidCount;
+    ui.previousBillsButton.disabled = busy || billPageIndex === 0;
+    ui.nextBillsButton.disabled = busy || !billNextCursor;
     ui.productAiButton.disabled = busy || !clients.some((client) => client.id === ui.productClient.value);
     ui.rebuildButton.disabled = busy || !currentCoverage || currentCoverage.complete;
     for (const [action, button] of [['close', ui.closePaymentOrderButton], ['reopen', ui.reopenPaymentOrderButton], ['reconcile', ui.reconcilePaymentOrderButton]]) {
@@ -177,6 +200,9 @@
     ui.clientsList.replaceChildren();
     summaryLoaded = false; ordersLoaded = false; auditLoaded = false; currentCoverage = null; rebuildCursor = null;
     orderItems = []; orderNextCursor = null; orderCursors = [null]; orderPageIndex = 0; loadedOrderFilters = null;
+    clearBills(); environmentLoaded = false; environmentGuide = null; environmentStatuses.clear();
+    ui.environmentGroups.replaceChildren(); ui.environmentIntro.replaceChildren(); ui.environmentNotes.replaceChildren();
+    ui.environmentSource.textContent = ''; ui.environmentCount.textContent = ''; message(ui.environmentMessage, '');
     ui.auditList.replaceChildren(); ui.auditEmpty.hidden = false; message(ui.auditMessage, '');
     ui.ordersRows.replaceChildren(); clearOrderDetails();
     ui.revenueChart.replaceChildren(); ui.coverageNotice.hidden = true;
@@ -592,6 +618,8 @@
     if (activePage === 'overview' && !summaryLoaded) await loadSummary();
     if (activePage === 'orders' && !ordersLoaded) await loadOrders(true);
     if (activePage === 'platforms' && !auditLoaded) await loadAudit();
+    if (activePage === 'bills' && !billsLoaded) await loadBills(true);
+    if (activePage === 'environment' && !environmentLoaded) await loadEnvironment();
   }
   async function loadAudit() {
     message(ui.auditMessage, '正在读取操作记录…');
@@ -614,7 +642,7 @@
     } catch (error) { report(error, ui.auditMessage); }
   }
   function renderClientSelectors() {
-    for (const [select, emptyLabel] of [[ui.summaryClient, '全部平台'], [ui.ordersClient, '全部平台'], [ui.productClient, '请选择平台']]) {
+    for (const [select, emptyLabel] of [[ui.summaryClient, '全部平台'], [ui.ordersClient, '全部平台'], [ui.billsClient, '全部平台'], [ui.productClient, '请选择平台']]) {
       const selected = select.value;
       const first = element('option', '', emptyLabel); first.value = '';
       const options = clients.map((client) => { const option = element('option', '', `${client.name} · ${client.id}`); option.value = client.id; return option; });
@@ -626,9 +654,10 @@
   function syncGrantModes() {
     const automatic = ui.grantDomainMode.value === 'auto';
     ui.grantOrigins.required = !automatic;
-    ui.grantOriginsLabel.textContent = automatic ? '已知 HTTPS 来源（可选）' : '允许 AI 配置的 HTTPS 来源';
+    ui.grantOriginsLabel.textContent = automatic ? '项目域名（可留空）' : '允许 AI 配置的 HTTPS 来源（必填）';
+    ui.grantOrigins.placeholder = automatic ? '不知道域名可直接留空；已知时可填 https://你的域名' : '每行填写一个 HTTPS 来源，例如 https://app.example.com';
     ui.grantOriginsHint.textContent = automatic
-      ? 'AI 可在这次单平台授权有效期内添加项目所需的公网 HTTPS 来源。已知域名可先填入，新增来源会在后台记录；平台配置仍只影响这个产品。'
+      ? '不知道域名可直接留空。项目 AI 会在本次单平台授权有效期内识别并补充所需的公网 HTTPS 来源；新增来源会在后台记录。授权到期后可重新生成任务继续配置。'
       : 'AI 只能使用这些来源。每行填写一个你控制的 HTTPS 来源；https://*.brclio.com 可授权子域名，不包含主域名。';
     ui.grantPricingHint.textContent = ui.grantPricingMode.value === 'detect'
       ? 'AI 先读取项目现有商品、套餐、费用及权益；遇到相互矛盾或缺失的定价信息，再向你确认，不会编造价格。'
@@ -830,7 +859,7 @@
       selectedOrderDetail = detail; pendingOrderAction = null; ui.orderActionForm.reset(); ui.orderActionForm.hidden = true;
       const index = orderItems.findIndex((order) => order.id === id);
       if (index >= 0) orderItems[index] = { ...orderItems[index], ...detail.order };
-      summaryLoaded = false; ordersLoaded = false; renderOrders(); renderOrderDetail();
+      summaryLoaded = false; ordersLoaded = false; billsLoaded = false; renderOrders(); renderOrderDetail();
       message(ui.orderDetailMessage, result.message || { close: '已核实并处理关闭请求。', reopen: '已重新启用，请复制新链接并重新发送给用户。', reconcile: '付款核实已完成，当前结果见订单状态。' }[action], 'success');
       if (action === 'reopen' && result.checkoutUrl) showOrderCheckout(result.checkoutUrl, detail.order);
     } catch (error) {
@@ -892,10 +921,190 @@
       setCoverage(result.coverage); renderOrders(); clearOrderDetails(); message(ui.ordersMessage, '');
     } catch (error) { report(error, ui.ordersMessage); }
   }
+  function clearBills() {
+    billsLoaded = false; billItems = []; billNextCursor = null; billCursors = [null]; billPageIndex = 0;
+    loadedBillFilters = null; billRevision = null; billTotals = null;
+    ui.billsAmount.textContent = '—'; ui.billsCount.textContent = '—';
+    ui.billsCoverage.textContent = '等待查询账单。';
+    renderBills();
+  }
+  function syncBillProvider() {
+    ui.billsAlipayButton.setAttribute('aria-pressed', String(billsProvider === 'alipay'));
+    ui.billsWechatButton.setAttribute('aria-pressed', String(billsProvider === 'wechat'));
+    ui.billsAmountLabel.textContent = `${providerLabel(billsProvider)} · 当月实收`;
+  }
+  function billQuery(filters, cursor = null) {
+    const query = new URLSearchParams({ ...filters, limit: '25' });
+    if (cursor) query.set('cursor', cursor);
+    return `/reports/bills?${query}`;
+  }
+  function readBillReport(result, filters) {
+    const invalid = () => { throw new ApiError(502, 'INVALID_REPORT', '账单数据不完整，请刷新查询。'); };
+    if (!result || !Array.isArray(result.items) || result.items.length > 25
+      || !(result.nextCursor === null || (typeof result.nextCursor === 'string' && result.nextCursor.length > 0))
+      || result.provider !== filters.provider || result.month !== filters.month
+      || (result.clientId || '') !== (filters.clientId || '')
+      || result.currency !== 'CNY' || result.basis !== 'payment-confirmed' || result.timezone !== 'Asia/Shanghai'
+      || typeof result.revision !== 'string' || !result.revision
+      || result.coverage?.complete !== true || result.coverage?.source !== 'canonical') invalid();
+    count(result.paidCount); money(result.paidAmountCents);
+    for (const item of result.items) {
+      if (!item || item.provider !== filters.provider || item.currency !== 'CNY'
+        || !['primary', 'duplicate'].includes(item.kind)
+        || !['orderId', 'clientId', 'productOrderId', 'sku', 'subject', 'tradeNo', 'paidAt'].every((key) => typeof item[key] === 'string')
+        || !Number.isFinite(Date.parse(item.paidAt)) || (filters.clientId && item.clientId !== filters.clientId)) invalid();
+      money(item.amountCents);
+      if (item.amount !== `${Math.floor(item.amountCents / 100)}.${String(item.amountCents % 100).padStart(2, '0')}`) invalid();
+    }
+    return result;
+  }
+  function renderBills() {
+    ui.billsRows.replaceChildren(...billItems.map((item) => {
+      const row = element('tr', '');
+      const date = element('td', 'order-dates', orderTime(item.paidAt));
+      const identity = element('td', 'order-identity');
+      identity.append(element('strong', '', item.productOrderId), element('span', '', item.orderId));
+      if (item.kind === 'duplicate') identity.append(element('small', '', '额外到账 · 不重复开通权益'));
+      const product = element('td', 'order-identity');
+      product.append(element('strong', '', clients.find((client) => client.id === item.clientId)?.name || item.clientId),
+        element('span', '', `${item.subject} · ${item.sku}`), element('small', '', item.clientId));
+      const trade = element('td', 'bill-trade-number', item.tradeNo || '—');
+      const amount = element('td', 'order-amount', money(item.amountCents));
+      const delivery = element('td', '');
+      delivery.append(element('span', `admin-badge${item.fulfillmentStatus === 'delivered' ? ' paid-status' : ''}`, item.fulfillmentStatus === 'delivered' ? '通知已送达' : '通知待送达'));
+      row.append(date, identity, product, trade, amount, delivery); return row;
+    }));
+    ui.billsEmpty.hidden = billItems.length !== 0;
+    ui.billsEmpty.textContent = billsLoaded ? '当前筛选下没有已确认付款。' : '选择月份与平台后查询账单。';
+    ui.billsPageLabel.textContent = `第 ${billPageIndex + 1} 页 · 本页 ${billItems.length} 笔`;
+    syncBillProvider(); syncControls();
+  }
+  async function loadBills(reset = false, targetPage = billPageIndex) {
+    message(ui.billsMessage, '正在读取确认付款账单…');
+    try {
+      if (reset) {
+        const filters = { provider: billsProvider, month: validMonth(ui.billsMonth.value), ...(ui.billsClient.value ? { clientId: ui.billsClient.value } : {}) };
+        clearBills(); loadedBillFilters = filters; targetPage = 0;
+      }
+      const result = readBillReport(await request(billQuery(loadedBillFilters, billCursors[targetPage])), loadedBillFilters);
+      if (!reset && result.revision !== billRevision) throw new InputError('账本已有新变更，请点击“查询账单”从第一页重新读取。');
+      billRevision = result.revision; billItems = result.items; billNextCursor = result.nextCursor; billPageIndex = targetPage;
+      billTotals = { paidCount: result.paidCount, paidAmountCents: result.paidAmountCents }; billsLoaded = true;
+      ui.billsAmount.textContent = money(result.paidAmountCents); ui.billsCount.textContent = count(result.paidCount);
+      ui.billsCoverage.textContent = `${loadedBillFilters.month} · ${providerLabel(loadedBillFilters.provider)} · 已核对原始账本全部订单 · 金额与笔数为所选月份全部记录`;
+      renderBills(); message(ui.billsMessage, '');
+    } catch (error) { report(error, ui.billsMessage); }
+  }
+  async function exportBills() {
+    if (!loadedBillFilters || !billsLoaded || !billTotals?.paidCount) return;
+    const filters = { ...loadedBillFilters }, seenCursors = new Set(), seenPayments = new Set();
+    const items = []; let cursor = null, expectedRevision = null, expectedCount = null, expectedAmount = null;
+    try {
+      do {
+        const result = readBillReport(await request(billQuery(filters, cursor)), filters);
+        if (expectedRevision !== null && (result.revision !== expectedRevision || result.paidCount !== expectedCount || result.paidAmountCents !== expectedAmount)) {
+          throw new InputError('导出期间账本发生变更，请重新导出以获取完整一致的账单。');
+        }
+        expectedRevision = result.revision; expectedCount = result.paidCount; expectedAmount = result.paidAmountCents;
+        for (const item of result.items) {
+          const identity = `${item.orderId}:${item.kind}:${item.attemptId || ''}:${item.tradeNo}`;
+          if (seenPayments.has(identity)) throw new InputError('账单分页出现重复记录，未生成文件，请重新查询后导出。');
+          seenPayments.add(identity); items.push(item);
+        }
+        if (items.length > expectedCount || (result.nextCursor && !result.items.length)) throw new InputError('账单分页结果与月份汇总不一致，未生成文件，请刷新后重试。');
+        message(ui.billsMessage, `正在读取完整月份账单… 已读取 ${count(items.length)} / ${count(expectedCount)} 笔。`);
+        cursor = result.nextCursor;
+        if (cursor && seenCursors.has(cursor)) throw new InputError('账单分页游标重复，未生成文件，请重新查询后导出。');
+        if (cursor) seenCursors.add(cursor);
+      } while (cursor);
+      if (items.length !== expectedCount || items.reduce((sum, item) => sum + item.amountCents, 0) !== expectedAmount) {
+        throw new InputError('账单明细与月份汇总不一致，未生成文件，请刷新后重试。');
+      }
+      const rows = [['支付方式', '付款时间（北京时间）', '产品订单号', '支付订单号', '平台', '商品代码', '商品', '支付平台交易号', '实收金额（元）', '到账类型', '产品通知'],
+        ...items.map((item) => [providerLabel(item.provider), orderTime(item.paidAt), item.productOrderId, item.orderId, item.clientId, item.sku, item.subject, item.tradeNo, item.amount, item.kind === 'duplicate' ? '额外到账' : '首次到账', item.fulfillmentStatus === 'delivered' ? '通知已送达' : '通知待送达'])];
+      downloadCsv(rows, `brclio-pay-${filters.provider}-${filters.month}${filters.clientId ? `-${filters.clientId}` : ''}.csv`);
+      message(ui.billsMessage, `已完整导出 ${filters.month} ${providerLabel(filters.provider)}账单，共 ${count(items.length)} 笔，实收 ${money(expectedAmount)}。`, 'success');
+    } catch (error) { report(error, ui.billsMessage); }
+  }
+  function environmentText(value) {
+    return typeof value === 'string' ? value : Array.isArray(value) ? value.filter((item) => typeof item === 'string').join('\n') : '';
+  }
+  function renderEnvironment() {
+    if (!environmentGuide) return;
+    const term = ui.environmentSearch.value.trim().toLocaleLowerCase(), groupId = ui.environmentGroup.value;
+    let visibleCount = 0;
+    const sections = environmentGuide.groups.filter((group) => !groupId || group.id === groupId).map((group) => {
+      const variables = group.variables.filter((variable) => !term || Object.values(variable).map(environmentText).join(' ').toLocaleLowerCase().includes(term));
+      if (!variables.length) return null;
+      visibleCount += variables.length;
+      const section = element('section', 'environment-group'), heading = element('div', 'environment-group-heading');
+      heading.append(element('h3', '', group.title)); if (group.description) heading.append(element('p', 'admin-muted', group.description));
+      section.append(heading);
+      for (const variable of variables) {
+        const article = element('article', 'environment-variable'), title = element('div', 'environment-variable-heading');
+        title.append(element('h4', '', variable.name), element('span', 'environment-label', variable.label));
+        const state = environmentStatuses.get(variable.name);
+        title.append(element('span', `admin-badge${state?.configured ? ' paid-status' : ''}`, state ? state.configured ? '已配置' : '未配置' : '状态未提供'));
+        article.append(title, element('p', 'environment-description', variable.description));
+        const fields = element('dl', 'environment-fields');
+        const values = [['维护方式', state?.storageType === 'binding' ? 'Cloudflare 资源绑定' : state?.storageType === 'Text' ? 'Cloudflare Text（明文）' : '请查配置位置'],
+          ['是否必需', variable.required ? '必需' : '按使用场景配置'], ['配置位置', variable.location], ['修改与生效', variable.changeNotes], ['维护注意', variable.maintenance], ['格式示例', variable.example]];
+        for (const [label, value] of values) {
+          if (!environmentText(value)) continue;
+          const row = element('div', ''); row.append(element('dt', '', label), element('dd', '', environmentText(value))); fields.append(row);
+        }
+        article.append(fields); section.append(article);
+      }
+      return section;
+    }).filter(Boolean);
+    ui.environmentGroups.replaceChildren(...sections); ui.environmentEmpty.hidden = visibleCount > 0;
+    ui.environmentCount.textContent = `显示 ${count(visibleCount)} 个变量 · 配置状态仅检查是否已提供，维护方式按维护约定显示`;
+  }
+  async function loadEnvironment() {
+    environmentLoaded = false; environmentGuide = null; environmentStatuses.clear();
+    ui.environmentGroups.replaceChildren(); ui.environmentIntro.replaceChildren(); ui.environmentNotes.replaceChildren();
+    ui.environmentSource.textContent = ''; ui.environmentCount.textContent = ''; ui.environmentEmpty.hidden = true;
+    message(ui.environmentMessage, '正在从私有数据仓库读取维护说明…');
+    try {
+      const result = await request('/environment'), guide = result.document;
+      if (!guide || guide.schema !== 1 || typeof guide.title !== 'string' || !Number.isFinite(Date.parse(guide.updatedAt))
+        || !Array.isArray(guide.intro) || !Array.isArray(guide.notes) || !Array.isArray(guide.groups)
+        || !Array.isArray(result.variables) || typeof result.source?.repository !== 'string' || typeof result.source?.path !== 'string'
+        || typeof result.source?.revision !== 'string') throw new ApiError(502, 'INVALID_ENVIRONMENT_GUIDE', '环境变量说明暂时无法读取，请重试。');
+      for (const group of guide.groups) {
+        if (!group || !['id', 'title'].every((key) => typeof group[key] === 'string') || !Array.isArray(group.variables)) throw new ApiError(502, 'INVALID_ENVIRONMENT_GUIDE', '环境变量分类不完整，请检查数据仓库说明。');
+        for (const variable of group.variables) if (!variable || !['name', 'label', 'description', 'location', 'changeNotes', 'maintenance', 'example'].every((key) => typeof variable[key] === 'string')) throw new ApiError(502, 'INVALID_ENVIRONMENT_GUIDE', '环境变量条目不完整，请检查数据仓库说明。');
+      }
+      environmentGuide = guide;
+      // Deliberately retain only status fields; runtime values never enter the page.
+      environmentStatuses = new Map(result.variables.filter((item) => item && typeof item.name === 'string' && typeof item.configured === 'boolean' && ['Text', 'binding'].includes(item.storageType))
+        .map((item) => [item.name, { configured: item.configured, storageType: item.storageType }]));
+      ui.environmentTitle.textContent = guide.title;
+      ui.environmentSource.textContent = `说明来源：${result.source.repository} / ${result.source.path} · 更新于 ${orderTime(guide.updatedAt)} · 修订 ${result.source.revision.slice(0, 12)}`;
+      if (typeof result.source.url === 'string') {
+        let sourceUrl;
+        try { sourceUrl = new URL(result.source.url); } catch { /* The source label remains available without a link. */ }
+        if (sourceUrl?.protocol === 'https:' && !sourceUrl.username && !sourceUrl.password && sourceUrl.hostname === 'github.com' && sourceUrl.pathname.startsWith('/BrclioData/BrclioPay-Data/blob/')) {
+          const link = element('a', 'quiet-link', '在数据仓库查看说明 ↗'); link.href = sourceUrl.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; ui.environmentSource.append(link);
+        }
+      }
+      ui.environmentIntro.replaceChildren(...guide.intro.filter((text) => typeof text === 'string').map((text) => element('p', 'admin-muted', text)));
+      ui.environmentNotes.replaceChildren(...guide.notes.filter((text) => typeof text === 'string').map((text) => element('p', 'field-hint', text)));
+      const selected = ui.environmentGroup.value, first = element('option', '', '全部分类'); first.value = '';
+      ui.environmentGroup.replaceChildren(first, ...guide.groups.map((group) => { const option = element('option', '', group.title); option.value = group.id; return option; }));
+      ui.environmentGroup.value = guide.groups.some((group) => group.id === selected) ? selected : '';
+      environmentLoaded = true; renderEnvironment(); message(ui.environmentMessage, '');
+    } catch (error) { report(error, ui.environmentMessage); }
+  }
   function csvCell(value) {
     let text = String(value ?? '');
     if (/^[\s]*[=+\-@\t\r]/.test(text)) text = `'${text}`;
     return `"${text.replaceAll('"', '""')}"`;
+  }
+  function downloadCsv(rows, filename) {
+    const blob = new Blob(['\uFEFF' + rows.map((row) => row.map(csvCell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob), link = element('a', ''); link.href = url; link.download = filename;
+    document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function extraPaymentTotal(order) {
     const payments = Array.isArray(order.duplicatePayments) ? order.duplicatePayments : [];
@@ -1016,6 +1225,29 @@
   ui.nextOrdersButton.addEventListener('click', () => { if (!orderNextCursor) return; orderCursors[orderPageIndex + 1] = orderNextCursor; void operation(ui.nextOrdersButton, '正在读取…', () => loadOrders(false, orderPageIndex + 1)); });
   ui.previousOrdersButton.addEventListener('click', () => { if (orderPageIndex > 0) void operation(ui.previousOrdersButton, '正在读取…', () => loadOrders(false, orderPageIndex - 1)); });
   ui.exportOrdersButton.addEventListener('click', exportCurrentOrders);
+  ui.billsFilters.addEventListener('change', () => {
+    clearBills(); message(ui.billsMessage, '筛选条件已更改，点击“查询账单”读取对应月份。');
+  });
+  ui.billsFilters.addEventListener('submit', (event) => {
+    event.preventDefault(); if (ui.billsFilters.reportValidity()) void operation(ui.searchBillsButton, '正在查询…', () => loadBills(true));
+  });
+  for (const [provider, button] of [['alipay', ui.billsAlipayButton], ['wechat', ui.billsWechatButton]]) button.addEventListener('click', () => {
+    if (busy || billsProvider === provider) return;
+    billsProvider = provider; clearBills(); void operation(button, '正在读取…', () => loadBills(true));
+  });
+  ui.nextBillsButton.addEventListener('click', () => {
+    if (!billNextCursor) return;
+    billCursors[billPageIndex + 1] = billNextCursor;
+    void operation(ui.nextBillsButton, '正在读取…', () => loadBills(false, billPageIndex + 1));
+  });
+  ui.previousBillsButton.addEventListener('click', () => {
+    if (billPageIndex > 0) void operation(ui.previousBillsButton, '正在读取…', () => loadBills(false, billPageIndex - 1));
+  });
+  ui.exportBillsButton.addEventListener('click', () => { void operation(ui.exportBillsButton, '正在导出完整月份…', exportBills); });
+  ui.reloadEnvironmentButton.addEventListener('click', () => { void operation(ui.reloadEnvironmentButton, '正在读取…', loadEnvironment); });
+  ui.environmentFilters.addEventListener('submit', (event) => { event.preventDefault(); renderEnvironment(); });
+  ui.environmentSearch.addEventListener('input', renderEnvironment);
+  ui.environmentGroup.addEventListener('change', renderEnvironment);
   ui.closeOrderDetailsButton.addEventListener('click', () => { clearOrderDetails(); syncControls(); });
   ui.reloadOrderDetailsButton.addEventListener('click', () => { const id = selectedOrderId; if (id) void operation(ui.reloadOrderDetailsButton, '正在刷新…', () => loadOrderDetails(id)); });
   ui.closePaymentOrderButton.addEventListener('click', () => beginOrderAction('close'));
@@ -1048,7 +1280,7 @@
       try {
         const result = await request('/reports/rebuild', { method: 'POST', body: { limit: 5, ...(rebuildCursor ? { cursor: rebuildCursor } : {}) } });
         rebuildCursor = result.nextCursor; setCoverage(result.coverage);
-        summaryLoaded = false; ordersLoaded = false; await loadActiveReport();
+        summaryLoaded = false; ordersLoaded = false; billsLoaded = false; await loadActiveReport();
         message(activePage === 'orders' ? ui.ordersMessage : ui.summaryMessage,
           `本批已补建 ${count(result.processed)} 笔。${result.coverage.complete ? '历史索引已完整。' : '已暂停；点击“补建下一批”继续。'}`, 'success');
       } catch (error) { report(error, activePage === 'orders' ? ui.ordersMessage : ui.summaryMessage); }
@@ -1064,6 +1296,8 @@
   const initialMonth = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date());
   ui.summaryMonth.value = initialMonth;
   ui.ordersMonth.value = initialMonth;
+  ui.billsMonth.value = initialMonth;
+  syncBillProvider();
   syncGrantModes();
   resetEditor();
   void operation(null, null, async () => {

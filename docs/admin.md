@@ -1,6 +1,6 @@
 # 接入管理与 AI 授权
 
-管理入口：`https://pay.bornforthis.cn/admin`。管理员登录后，可以查看经营概览和订单、手动关闭或重新启用订单、核实补记付款、维护平台、生成 AI 接入任务及撤销短期授权。这里的“平台”和支付 API 中的产品 `clientId` 是同一个隔离单位。
+管理入口：`https://pay.bornforthis.cn/admin`。管理员登录后，可以查看经营概览、订单、支付宝与微信账单、环境变量说明，手动关闭或重新启用订单、核实补记付款、维护平台、生成 AI 接入任务及撤销短期授权。这里的“平台”和支付 API 中的产品 `clientId` 是同一个隔离单位。
 
 支付宝应用已上线，2026-10-15 已完成 `xhs-downloader` 一笔 ¥3.00 日付的正式付款、通知送达和实际后端会员开通验收；临时验收关闭后，用户明确授权正式开放，正式配置为 `PAYMENT_ENABLED=true`。实时状态以健康接口或签名目录的 `acceptingPayments` 为准；其他套餐、客户端、手机渠道及退款未据此标记通过。注册平台、生成任务或保存商品不代表该产品已经完成付款与权益验收。
 
@@ -82,6 +82,18 @@
 | `POST /api/admin/orders/:id/close` | JSON `{expectedVersion,requestId,reason}`，核实并提前关闭 |
 | `POST /api/admin/orders/:id/reopen` | 相同请求结构，核实后新建付款尝试；成功时顶层返回 `checkoutUrl` |
 | `POST /api/admin/orders/:id/reconcile` | 相同请求结构，向支付宝核实并补记真实付款 |
+
+## 支付宝与微信账单
+
+在 `/admin#bills` 选择支付宝或微信支付，再按付款月份和平台查询。月份按北京时间的实际付款确认时间划分，和“订单记录”的创建月份口径不同。明细包括中心订单号、业务订单号、交易号、付款时间、商品、金额和权益通知状态。额外到账逐笔列出，避免多次实付只记一笔；账单是已确认收款，不是扣除手续费、退款后的净结算。
+
+接口为 `GET /api/admin/reports/bills?provider=alipay|wechat&month=YYYY-MM&clientId=可选&limit=25&cursor=可选`，需要管理员会话。全月笔数和总额来自完整原始账本快照，不依赖历史统计索引；列表可继续加载，CSV 会读取所选月份全部分页。分页绑定仓库版本；导出期间数据变化时应重新查询，不能拼接不同版本。容量不足或历史记录异常时明确报错，不返回截断合计。当前使用完整账本扫描，账本规模增大后可补充付款月份索引。
+
+## 环境变量说明
+
+`/admin#environment` 从私有数据仓库 `maintenance/environment/guide.json` 读取每个变量的用途、占位示例、配置位置、修改方法与历史影响，支持搜索和分类。页面只显示变量是否已提供，不返回当前运行值。“维护方式”是约定的 Text 或资源绑定类型；实际 Cloudflare 类型由发布审计核对。
+
+说明文件独立于订单和其他配置，直接在数据仓库按相同结构修改后刷新页面即可生效，无需发布代码。它只保存说明，编辑它不会改变 Cloudflare 参数。当前值在 Cloudflare 后台 Worker `brclio-pay-unified` 中以 Text 明文维护；`ASSETS` 和三个限流器仍为资源绑定。具体流程见 [environment-variables.md](environment-variables.md)。
 
 ## 管理员与明文分片存储
 

@@ -1,0 +1,455 @@
+{
+  "schema": 1,
+  "title": "运行环境变量维护说明",
+  "updatedAt": "2026-10-21T15:01:27.219Z",
+  "intro": [
+    "生产 Worker 为 brclio-pay-unified。全部运行变量使用 Cloudflare 服务端 Text（明文）类型，维护者可在 Cloudflare 后台查看和修改；ASSETS 与 3 个限流器保持各自的资源绑定类型。",
+    "本页只保存变量名称、用途与占位示例，不保存实际私钥、token、密码哈希或其他运行值；当前值在 Cloudflare 后台维护。状态指示只说明运行时是否已配置，不代表凭据已通过商户验收。",
+    "说明文档保存于指定私有数据仓库 maintenance/environment/guide.json；文档独立于订单文件。编辑文档只更新说明，不会修改 Worker 变量；说明更新后点击“刷新说明与状态”，或重新加载本页即可读取。",
+    "Cloudflare 中保存运行参数时需完成保存与部署。日常源码发布使用 npm run deploy，会保留 Cloudflare 后台全部现有 Text 值；无需重新填写商户或管理员参数。",
+    "scripts/deploy-runtime.mjs 仅用于首次初始化或明确重新配置，会从本地运行配置文件写入变量；日常发布不运行它。密钥轮换、换商户、换域名应按对应字段的影响说明处理。"
+  ],
+  "groups": [
+    {
+      "id": "runtime",
+      "title": "支付服务与开关",
+      "description": "统一服务地址、收款环境及链接签名设置。",
+      "variables": [
+        {
+          "name": "PAY_BASE_URL",
+          "label": "支付中心地址",
+          "description": "支付页面、通知地址及后台来源校验使用的公网 HTTPS 根地址，只写协议与域名，不加路径、查询参数或末尾业务路由。",
+          "required": true,
+          "sensitive": false,
+          "example": "https://pay.example.com",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 更换域名需要先完成域名部署及支付平台回调配置；已有链接仍指向原域名。",
+          "maintenance": "当前生产域名是 pay.bornforthis.cn。保留旧域名访问，直到旧支付链接不再使用。"
+        },
+        {
+          "name": "PAYMENT_MODE",
+          "label": "支付环境",
+          "description": "live 表示真实收款；sandbox 表示支付宝沙箱。微信 Native 只支持 live。",
+          "required": true,
+          "sensitive": false,
+          "example": "live",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 切换不会迁移或重写历史订单；真实商户凭据与沙箱凭据不可混用。",
+          "maintenance": "当前双渠道生产系统保持 live。测试环境应独立部署，不在生产服务上来回切换。"
+        },
+        {
+          "name": "PAYMENT_ENABLED",
+          "label": "新收款开关",
+          "description": "填字符串 true 开启新收款；填 false 暂停新收款。已有支付通知与订单记录仍需要继续处理。",
+          "required": true,
+          "sensitive": false,
+          "example": "true",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 不会改变已有订单的金额、状态或已签发链接的历史记录；暂停后仍需关注在途付款。",
+          "maintenance": "维护时可暂时设置 false；恢复前先确认商户、GitHub 和回调正常。"
+        },
+        {
+          "name": "CHECKOUT_SECRET",
+          "label": "统一收银台链接签名密钥",
+          "description": "为统一收银台链接生成 HMAC 签名，并用于部分限流键派生。必须保留现有值，长度至少 32 个字符。",
+          "required": true,
+          "sensitive": true,
+          "example": "<原有至少32字符的签名密钥>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 更换后旧收银台链接签名失效，历史订单数据不会被删除。",
+          "maintenance": "从现有 Worker Text 变量或本地受控备份取回原值。不要为了调整显示类型而重新生成。"
+        }
+      ]
+    },
+    {
+      "id": "alipay",
+      "title": "支付宝商户",
+      "description": "这些值属于支付中心商户，接入项目和临时 AI 授权不需要取得。",
+      "variables": [
+        {
+          "name": "ALIPAY_APP_ID",
+          "label": "支付宝应用 APPID",
+          "description": "开放平台中已开通网页、手机网站支付产品的应用编号，必须与私钥、商户身份配套。",
+          "required": true,
+          "sensitive": false,
+          "example": "<支付宝应用APPID>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 切换应用会影响待付款订单查询、付款通知身份校验及后续交易；不会改写历史账单。",
+          "maintenance": "从支付宝开放平台对应应用的开发设置获取，保留现有正式应用。"
+        },
+        {
+          "name": "ALIPAY_CHANNELS",
+          "label": "支付宝可用方式",
+          "description": "逗号分隔的 page、wap。page 为电脑网站支付，wap 为手机网站支付，需已签约对应产品。",
+          "required": true,
+          "sensitive": false,
+          "example": "page,wap",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 影响收银台当前允许发起的方式，不修改历史订单的支付渠道。",
+          "maintenance": "保留商户已经开通的方式；不要填写 native、微信渠道或带空格的名称。"
+        },
+        {
+          "name": "ALIPAY_PRIVATE_KEY",
+          "label": "支付宝应用私钥",
+          "description": "RSA2 应用私钥，用于向支付宝签名请求。填写完整 PEM 或当前系统已使用的原私钥内容。",
+          "required": true,
+          "sensitive": true,
+          "example": "-----BEGIN PRIVATE KEY-----\n<完整应用私钥内容>\n-----END PRIVATE KEY-----",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 必须先在支付宝配置匹配的应用公钥；错误或不配套会导致下单、查单、关单失败。历史记录本身不变。",
+          "maintenance": "从现有配置或生成该应用密钥的受控备份获取；支付宝后台通常不能下载已遗失的应用私钥。保持原有换行。"
+        },
+        {
+          "name": "ALIPAY_PUBLIC_KEY",
+          "label": "支付宝公钥",
+          "description": "支付宝提供的验签公钥，用于验证支付宝响应与异步通知，不是自己生成的应用公钥。",
+          "required": true,
+          "sensitive": false,
+          "example": "-----BEGIN PUBLIC KEY-----\n<支付宝提供的公钥内容>\n-----END PUBLIC KEY-----",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 更新后按新公钥验签；错误会使通知与查单结果无法确认，历史订单原记录不变。",
+          "maintenance": "从支付宝开放平台对应应用的加签设置中获取“支付宝公钥”。与当前应用的加签方式保持一致。"
+        },
+        {
+          "name": "ALIPAY_SELLER_ID",
+          "label": "支付宝商户 PID",
+          "description": "实际收款方商户 PID，支付确认时与支付宝返回的卖家身份严格核对。",
+          "required": true,
+          "sensitive": false,
+          "example": "<支付宝收款商户PID>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 切换 PID 会影响旧交易身份核验；不得仅为更换后台显示而修改。",
+          "maintenance": "在支付宝商家中心或开放平台查看签约主体的 PID，保留原收款商户。"
+        },
+        {
+          "name": "ALIPAY_GATEWAY",
+          "label": "支付宝网关（可选）",
+          "description": "通常留空，系统按 PAYMENT_MODE 选择官方网关。只有明确配置支付宝沙箱时才需要指定对应沙箱网关。",
+          "required": false,
+          "sensitive": false,
+          "example": "<支付宝官方沙箱网关HTTPS地址；生产通常不填写>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 网关与 PAYMENT_MODE 不匹配会阻止服务收款；历史交易仍属于原商户与环境。",
+          "maintenance": "生产 live 保持现有默认值，不填写代理、第三方地址或测试网关。"
+        }
+      ]
+    },
+    {
+      "id": "wechat",
+      "title": "微信支付商户",
+      "description": "微信支付 API v3 Native 二维码收款；商户证书、公钥与 API v3 密钥用途不同。",
+      "variables": [
+        {
+          "name": "WECHAT_MCH_ID",
+          "label": "微信商户号",
+          "description": "微信支付正式商户号，用于请求签名和交易收款身份核验。",
+          "required": true,
+          "sensitive": false,
+          "example": "<微信支付商户号>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 切换商户会影响旧订单查单、关单及通知身份核验，不会搬迁历史交易。",
+          "maintenance": "在微信支付商户平台账户中心查看，必须与证书、私钥、API v3 密钥属于同一商户。"
+        },
+        {
+          "name": "WECHAT_APP_ID",
+          "label": "微信应用 AppID",
+          "description": "已与该微信商户号绑定的应用 AppID，格式以 wx 开头。",
+          "required": true,
+          "sensitive": false,
+          "example": "wx<已绑定应用的16位标识>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 新请求和通知会按此 AppID 验证；更换会影响旧订单核验。",
+          "maintenance": "从微信公众平台/开放平台及微信支付商户平台的 AppID 绑定页面确认现有对应关系。"
+        },
+        {
+          "name": "WECHAT_CHANNELS",
+          "label": "微信支付方式",
+          "description": "当前系统支持 native，即微信扫码支付。",
+          "required": true,
+          "sensitive": false,
+          "example": "native",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 影响是否装配微信 Native 支付服务；不会变更历史订单 provider 或账单归属。",
+          "maintenance": "当前生产保持 native；其他微信支付方式需先实现对应接口后才能配置。"
+        },
+        {
+          "name": "WECHAT_SERIAL_NO",
+          "label": "微信商户证书序列号",
+          "description": "与 WECHAT_PRIVATE_KEY 配套的商户 API 证书序列号，用于微信 API 请求 Authorization 中的 serial_no。",
+          "required": true,
+          "sensitive": false,
+          "example": "<商户API证书16至64位十六进制序列号>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 证书轮换时与对应私钥一起更新；不匹配会导致下单、查单、关单鉴权失败。",
+          "maintenance": "从微信支付商户平台 API 安全的商户 API 证书信息获取。这不是微信支付公钥 ID。"
+        },
+        {
+          "name": "WECHAT_PRIVATE_KEY",
+          "label": "微信商户 API 私钥",
+          "description": "商户 API 证书配套的 PKCS#8 RSA 私钥，通常来自 apiclient_key.pem，用于签名请求。",
+          "required": true,
+          "sensitive": true,
+          "example": "-----BEGIN PRIVATE KEY-----\n<完整商户API私钥内容>\n-----END PRIVATE KEY-----",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 与 WECHAT_SERIAL_NO 成对轮换；错误会导致微信请求失败，历史账单记录不变。",
+          "maintenance": "从申请商户 API 证书时保存的私钥文件取值，保留 PEM 首尾与换行。不要填公钥或证书全文。"
+        },
+        {
+          "name": "WECHAT_API_V3_KEY",
+          "label": "微信 API v3 密钥",
+          "description": "32 字节 API v3 密钥，用于解密微信异步通知。仅用于微信协议，不是 GitHub 数据加密密钥。",
+          "required": true,
+          "sensitive": true,
+          "example": "<微信商户平台设置的32字节APIv3密钥>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 修改后按新密钥解密通知；与商户平台不一致会使付款通知无法确认。历史 JSON 数据不需要重新加密。",
+          "maintenance": "在微信支付商户平台 → API 安全设置/重置。修改前处理在途通知，并确认商户平台与 Worker 同步。"
+        },
+        {
+          "name": "WECHAT_PUBLIC_KEYS_JSON",
+          "label": "微信支付公钥映射",
+          "description": "JSON 对象：键为微信支付公钥 ID，值为对应完整 PEM 公钥。用于验证响应和通知签名，可以保留多个仍需验签的可信公钥。",
+          "required": true,
+          "sensitive": false,
+          "example": "{\"PUB_KEY_ID_<公钥ID>\":\"-----BEGIN PUBLIC KEY-----\\n<完整微信支付公钥内容>\\n-----END PUBLIC KEY-----\"}",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 删除仍在使用的公钥会使相关响应或重试通知验签失败；历史订单本身不变。",
+          "maintenance": "从微信支付商户平台 API 安全的微信支付公钥页面下载公钥及 ID。使用合法 JSON，字符串内换行写成 \\n；不要放商户证书序列号。"
+        },
+        {
+          "name": "WECHAT_PUBLIC_KEY_ID",
+          "label": "当前微信支付公钥 ID（可选）",
+          "description": "请求中指定的微信支付公钥 ID，必须存在于 WECHAT_PUBLIC_KEYS_JSON。未填时使用映射中的第一个 ID。",
+          "required": false,
+          "sensitive": false,
+          "example": "PUB_KEY_ID_<当前公钥ID>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 轮换时先增加新公钥映射，再改此 ID；仍需处理旧响应或通知时保留旧公钥。",
+          "maintenance": "从微信支付公钥页面复制准确 ID。当前生产建议显式配置，避免依赖 JSON 键的先后顺序。"
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "title": "GitHub 私有数据仓库",
+      "description": "业务数据仅保存在 BrclioData/BrclioPay-Data，以独立明文 JSON 分文件保存。",
+      "variables": [
+        {
+          "name": "GITHUB_APP_ID",
+          "label": "GitHub App 编号",
+          "description": "用于签发 GitHub App JWT，生产使用已安装在指定私有数据仓库的 App。",
+          "required": true,
+          "sensitive": false,
+          "example": "<GitHubApp的AppID或该App的ClientID>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 必须与私钥、安装及仓库权限配套；错误会使业务数据无法读取和保存。",
+          "maintenance": "GitHub → Organizations → BrclioData → Settings → Developer settings → GitHub Apps → BrclioPay 查看。当前 App ID 为 5411175。"
+        },
+        {
+          "name": "GITHUB_APP_PRIVATE_KEY",
+          "label": "GitHub App 私钥",
+          "description": "GitHub App 的完整 PEM 私钥，用于换取限于指定数据仓库的短期 installation token。",
+          "required": true,
+          "sensitive": true,
+          "example": "-----BEGIN RSA PRIVATE KEY-----\n<完整GitHubApp私钥内容>\n-----END RSA PRIVATE KEY-----",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 可先为同一 App 新建一把私钥、部署并验证，再撤销旧私钥；不改变仓库中已有业务数据。",
+          "maintenance": "从该 GitHub App 设置生成并下载 .pem。当前受控原文件位于维护者证书目录，实际值只填写到 Worker。"
+        },
+        {
+          "name": "GITHUB_APP_INSTALLATION_ID",
+          "label": "GitHub App 安装编号（可选）",
+          "description": "指定此 App 在数据仓库所属组织的 installation ID。可留空，系统会按目标仓库查询当前安装。",
+          "required": false,
+          "sensitive": false,
+          "example": "<GitHubApp安装编号>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 重新安装 App 后 ID 可能变化；失配会导致数据访问失败，不会自动搬迁数据。",
+          "maintenance": "从 GitHub App 安装页面 URL 或 /repos/BrclioData/BrclioPay-Data/installation 接口获取。不是 App ID、Client ID 或 token。"
+        },
+        {
+          "name": "GITHUB_REPOSITORY",
+          "label": "数据仓库",
+          "description": "统一支付的唯一业务数据仓库，填写 owner/repository 格式。",
+          "required": true,
+          "sensitive": false,
+          "example": "<组织名>/<私有数据仓库名>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 修改会切换整个业务数据来源；订单、平台、授权不会自动复制。当前系统必须保留指定仓库。",
+          "maintenance": "生产固定 BrclioData/BrclioPay-Data；保证仓库私有，App 仅授权此仓库 Contents 读写、Metadata 只读。"
+        },
+        {
+          "name": "GITHUB_BRANCH",
+          "label": "数据分支",
+          "description": "读取及提交业务 JSON 使用的数据仓库分支。",
+          "required": true,
+          "sensitive": false,
+          "example": "main",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 更换分支会切换可见的数据版本，不能视为自动迁移。",
+          "maintenance": "保留已部署的 main 分支；不要删除或重写历史提交，也不要让分支保护阻断 App 必需的写入。"
+        },
+        {
+          "name": "REGISTRY_STORAGE_MODE",
+          "label": "平台注册表存储方式",
+          "description": "生产使用 plain：平台、授权、接入计划、审计记录以独立明文 JSON 保存在私有仓库。",
+          "required": true,
+          "sensitive": false,
+          "example": "plain",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 本系统生产固定 plain；修改不会自动转换旧数据格式。",
+          "maintenance": "无需配置 REGISTRY_ENCRYPTION_KEY，也不需要引入任何额外业务数据库或存储服务。"
+        },
+        {
+          "name": "CLIENTS_JSON",
+          "label": "旧式环境平台注册表",
+          "description": "兼容旧版本的环境内平台配置，仅在 GitHub 注册表尚不存在时作为兜底。统一生产保持空数组，已建平台注册表从 GitHub 独立文件读取。",
+          "required": true,
+          "sensitive": false,
+          "example": "[]",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。现有 GitHub 平台注册表不会被此项覆盖，既有历史订单也不会自动调整。",
+          "maintenance": "新增平台、SKU、来源及回调应使用管理后台或受限 AI 接入流程，不手工把商品密钥写入此字段。"
+        }
+      ]
+    },
+    {
+      "id": "admin",
+      "title": "管理后台登录",
+      "description": "沿用已有管理员账号参数。Text 是 Cloudflare 的保存类型，密码校验仍使用哈希。",
+      "variables": [
+        {
+          "name": "ADMIN_EMAIL",
+          "label": "管理员账号邮箱",
+          "description": "管理后台登录使用的唯一管理员邮箱，保存时去除首尾空格并使用小写。",
+          "required": true,
+          "sensitive": true,
+          "example": "admin@example.com",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 更改后登录账号随之变化，现有会话身份校验失效；历史订单与支付签名不变。",
+          "maintenance": "从现有 Worker 参数或管理员自己的邮箱记录获取。更改前确认可用密码及配套哈希参数。"
+        },
+        {
+          "name": "ADMIN_PASSWORD_HASH",
+          "label": "管理员密码校验哈希",
+          "description": "格式为 pbkdf2-sha256$100000$<64位盐>$<64位哈希>。这里保存哈希，不填明文登录密码。",
+          "required": true,
+          "sensitive": true,
+          "example": "pbkdf2-sha256$100000$<64位十六进制盐>$<64位十六进制哈希>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 更改后旧密码与已有后台会话失效；与 ADMIN_PASSWORD_PEPPER 配套更新，不影响支付订单。",
+          "maintenance": "用项目 scripts/configure-admin.mjs 从标准输入生成配套参数；输出在忽略的本地 secrets 文件中，不打印密码。将生成的哈希及配套 pepper 填入 Worker Text。"
+        },
+        {
+          "name": "ADMIN_PASSWORD_PEPPER",
+          "label": "管理员密码校验辅助密钥",
+          "description": "64 位十六进制随机值，用于密码哈希前的 HMAC。它与密码哈希共同决定可用密码。",
+          "required": true,
+          "sensitive": true,
+          "example": "<64位十六进制随机值>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 单独更换会使原密码无法登录；重置时必须同步生成并填写对应 ADMIN_PASSWORD_HASH。",
+          "maintenance": "保留现有值；使用 scripts/configure-admin.mjs 重置时保存同次生成的完整管理员参数。"
+        },
+        {
+          "name": "ADMIN_SESSION_SECRET",
+          "label": "管理员会话签名密钥",
+          "description": "64 位十六进制随机值，用于签名后台登录 Cookie。",
+          "required": true,
+          "sensitive": true,
+          "example": "<64位十六进制随机值>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 更换会立即使已有后台登录会话失效，需重新登录；不影响商户签名或历史订单。",
+          "maintenance": "正常维护保留原值。需要强制退出全部会话时再轮换，且确认新值格式正确。"
+        }
+      ]
+    },
+    {
+      "id": "legacy",
+      "title": "旧微信支付兼容",
+      "description": "为已迁移订单、旧微信入口及已签发链接保留原身份与签名。",
+      "variables": [
+        {
+          "name": "LEGACY_WECHAT_BASE_URL",
+          "label": "旧微信支付地址",
+          "description": "旧微信收银台域名，用于旧入口身份、来源与历史链接兼容。",
+          "required": true,
+          "sensitive": false,
+          "example": "https://legacy-pay.example.com",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 修改可能使旧页面入口或来源校验失败，历史订单数据保留。",
+          "maintenance": "当前需保留 paywc.bornforthis.cn 的原配置与网关；新项目使用统一 PAY_BASE_URL。"
+        },
+        {
+          "name": "LEGACY_WECHAT_CHECKOUT_SECRET",
+          "label": "旧微信收银台签名密钥",
+          "description": "原微信服务签发 checkout:v1 链接的 HMAC 密钥，至少 32 个字符。",
+          "required": true,
+          "sensitive": true,
+          "example": "<原微信服务至少32字符的签名密钥>",
+          "location": "Cloudflare → Workers & Pages → brclio-pay-unified → Settings → Variables and Secrets，类型选择 Text",
+          "changeNotes": "在 Cloudflare 修改 Text 变量后保存并部署；只有新部署开始使用新值。更改前记录原值，部署后检查健康状态与相关功能。 更换后已发出的旧微信收银台链接失效；不会修改原订单号、金额、付款流水或通知数据。",
+          "maintenance": "从旧微信受控配置/备份取得原值，迁移后的兼容期持续保留。不要替换为 CHECKOUT_SECRET。"
+        }
+      ]
+    },
+    {
+      "id": "bindings",
+      "title": "Cloudflare 程序绑定",
+      "description": "以下 4 个是程序资源绑定，不是环境 Text 变量，也不存放业务订单。由 wrangler.jsonc 和部署过程创建及维护。",
+      "variables": [
+        {
+          "name": "ASSETS",
+          "label": "管理后台及收银台静态文件",
+          "description": "Cloudflare Workers Static Assets 绑定，提供 public 目录内页面、样式和脚本。",
+          "required": true,
+          "sensitive": false,
+          "example": "<assets 绑定；不是 Text>",
+          "location": "项目 wrangler.jsonc → assets.binding = ASSETS",
+          "changeNotes": "修改 public 文件后重新构建并部署 Worker；Cloudflare 自动关联新静态资源版本。",
+          "maintenance": "不要在 Variables 中创建同名 Text，也不要手工粘贴文件内容。当前前端由此绑定提供。"
+        },
+        {
+          "name": "ADMIN_LOGIN_LIMITER",
+          "label": "管理员登录限流器",
+          "description": "每分钟限制登录尝试次数，当前每个限流键 5 次，用于后台登录保护。",
+          "required": true,
+          "sensitive": false,
+          "example": "<ratelimit 绑定；不是 Text>",
+          "location": "项目 wrangler.jsonc → ratelimits → ADMIN_LOGIN_LIMITER",
+          "changeNotes": "在 wrangler.jsonc 调整 limit/period 或绑定后重新部署。不会改变订单、密钥或后台密码。",
+          "maintenance": "保持专用 namespace_id 与绑定名称，缺少此绑定会阻止管理员登录。"
+        },
+        {
+          "name": "INTEGRATION_LIMITER",
+          "label": "AI 接入限流器",
+          "description": "限制临时授权接入请求频率，当前每个限流键每分钟 30 次。",
+          "required": true,
+          "sensitive": false,
+          "example": "<ratelimit 绑定；不是 Text>",
+          "location": "项目 wrangler.jsonc → ratelimits → INTEGRATION_LIMITER",
+          "changeNotes": "修改配置后重新部署；只影响请求频率，不扩展授权范围或有效期。",
+          "maintenance": "保留现有专用 namespace_id，不把它改成 Text，也不通过限流器保存平台业务资料。"
+        },
+        {
+          "name": "PAYMENT_API_LIMITER",
+          "label": "支付接口限流器",
+          "description": "限制支付接口和部分后台订单操作频率，当前每个限流键每分钟 120 次。",
+          "required": true,
+          "sensitive": false,
+          "example": "<ratelimit 绑定；不是 Text>",
+          "location": "项目 wrangler.jsonc → ratelimits → PAYMENT_API_LIMITER",
+          "changeNotes": "修改配置后重新部署；不会修改历史交易与平台密钥。",
+          "maintenance": "保持现有绑定名称及专用 namespace_id。限流错误一般等待一个窗口后重试同一业务订单。"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "正式账单及订单仍以各支付渠道实际结果与 GitHub 独立订单记录为准；改变环境变量不构成历史数据迁移。",
+    "产品项目只需要统一支付地址和本平台的 API/回调凭据。受限 AI 接入授权可补齐本平台 HTTPS 来源、商品及回调，不能查看或修改这里的商户、管理员或 GitHub App 运行凭据。",
+    "本生产服务不使用 GITHUB_TOKEN、REGISTRY_ENCRYPTION_KEY、ENCRYPTION_KEY、ORDER_ID_SECRET；它们是旧系统/迁移辅助参数，不要从旧备份全量覆盖到统一 Worker。",
+    "GitHub 中的业务数据按上海时间年月和独立记录保存。仓库保持私有，App 仅授权 BrclioData/BrclioPay-Data；不新增 D1、KV、R2、Durable Objects 或其他业务数据仓库。",
+    "修改后至少检查 /health、后台登录及对应渠道查单。自动检查、成功部署、真实到账、真实产品权益开通是不同验收阶段。"
+  ]
+}
