@@ -5,6 +5,7 @@ import {generateKeyPairSync,sign} from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {assetDefinitions,assetUrl as publishedAssetUrl,versionCode,verifyEnvelope} from '../clients/scripts/release-manifest.mjs';
 const require=createRequire(import.meta.url);
 const security=require('../clients/desktop/security.cjs');
@@ -26,11 +27,11 @@ test('remote resource filter permits only own HTTPS and own blob downloads',()=>
   for(const u of ['file:///etc/passwd','javascript:alert(1)','blob:https://evil.test/x','https://github.com/Brclio/Brclio-Pay','data:text/html,foo'])assert.equal(security.remoteResource(u),false);
 });
 test('IPC authenticates exact local main frame and denies remote or child frame',()=>{
-  const frame={url:'file:///safe/shell.html'},wc={mainFrame:frame,isDestroyed:()=>false};
-  assert(security.trustedShell({sender:wc,senderFrame:frame},wc,'/safe/shell.html'));
-  assert.equal(security.trustedShell({sender:wc,senderFrame:{...frame}},wc,'/safe/shell.html'),false);
-  assert.equal(security.trustedShell({sender:{},senderFrame:frame},wc,'/safe/shell.html'),false);
-  frame.url='https://pay.bornforthis.cn/admin';assert.equal(security.trustedShell({sender:wc,senderFrame:frame},wc,'/safe/shell.html'),false);
+  const shellPath=path.resolve('safe','shell.html'),frame={url:pathToFileURL(shellPath).href},wc={mainFrame:frame,isDestroyed:()=>false};
+  assert(security.trustedShell({sender:wc,senderFrame:frame},wc,shellPath));
+  assert.equal(security.trustedShell({sender:wc,senderFrame:{...frame}},wc,shellPath),false);
+  assert.equal(security.trustedShell({sender:{},senderFrame:frame},wc,shellPath),false);
+  frame.url='https://pay.bornforthis.cn/admin';assert.equal(security.trustedShell({sender:wc,senderFrame:frame},wc,shellPath),false);
 });
 test('valid signed manifest verifies exact identity and bounded package entries',()=>{
   const m=manifest(),signed=envelope(m);assert.deepEqual(verifyEnvelope(JSON.parse(signed.toString()),publicKey,settings),m);assert.deepEqual(validateManifestEnvelope(signed,publicKey,settings),m);
