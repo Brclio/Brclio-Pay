@@ -54,7 +54,7 @@ function Invoke-IsolatedUserTrust {
     $output = $stdout.GetAwaiter().GetResult(); $diagnostic = $stderr.GetAwaiter().GetResult()
     if ($process.ExitCode -ne 0) { Write-Host $diagnostic; throw ('CurrentUser certificate operation failed with exit code ' + $process.ExitCode + '.') }
     $operationEvidence = $output | ConvertFrom-Json
-    if ($operationEvidence.schema -ne 1 -or $operationEvidence.scope -ne 'CurrentUser' -or $operationEvidence.provider -ne 'CERT_STORE_PROV_REG' -or $operationEvidence.registryScope -ne 'HKCU' -or $operationEvidence.physicalStorePresenceVerified -ne $true -or $operationEvidence.store -ne $Store -or $operationEvidence.operation -ne $Operation -or $operationEvidence.certificateSha256 -cne $expected.Identity.certificateSha256 -or $operationEvidence.unprotectedFlagUsed -ne $false -or $operationEvidence.globalTrustModified -ne $false) { throw 'Physical CurrentUser store operation provenance mismatch.' }
+    if ($operationEvidence.schema -ne 1 -or $operationEvidence.scope -ne 'CurrentUser' -or $operationEvidence.provider -ne 'CryptUIWizImport_NO_UI' -or $operationEvidence.registryScope -ne 'HKCU' -or $operationEvidence.physicalProvider -ne 'CERT_STORE_PROV_REG' -or $operationEvidence.importFlags -ne '0x00030001' -or $operationEvidence.currentUserFlags -ne '0x00010000' -or $operationEvidence.physicalStorePresenceVerified -ne $true -or $operationEvidence.store -ne $Store -or $operationEvidence.operation -ne $Operation -or $operationEvidence.certificateSha256 -cne $expected.Identity.certificateSha256 -or $operationEvidence.unprotectedFlagUsed -ne $false -or $operationEvidence.globalTrustModified -ne $false) { throw 'Physical CurrentUser store operation provenance mismatch.' }
   } finally { $process.Dispose() }
   $location = 'Cert:\CurrentUser\' + $Store + '\' + $expected.Identity.certificateThumbprintSha1
   $present = Test-Path -LiteralPath $location
@@ -67,7 +67,7 @@ function Invoke-IsolatedUserTrust {
   }
   Write-VerificationProgress ('Cert provider logical visibility after ' + $Operation + ' ' + $Store + ': ' + $present)
   Write-VerificationProgress ('Completed bounded CurrentUser certificate operation: ' + $Operation + ' ' + $Store)
-  return [pscustomobject]@{ scope='CurrentUser'; provider='CERT_STORE_PROV_REG'; store=$Store; operation=$Operation; verified=$true; physicalStorePresenceVerified=$true; logicalStoreVisible=$present; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
+  return [pscustomobject]@{ scope='CurrentUser'; provider='CryptUIWizImport_NO_UI'; store=$Store; operation=$Operation; verified=$true; physicalStorePresenceVerified=$true; logicalStoreVisible=$present; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
 }
 
 function Install-Package([string]$Path) {
@@ -165,7 +165,8 @@ $signingEvidence['afterTrustRemoval'] = $afterTrustRemoval
 $signingEvidence['trustRemovedNativeRejected'] = $true
 $signingEvidence['currentUserTrustRemovedAfterVerification'] = $true
 $signingEvidence['trustStoresAbsentBeforeVerification'] = $true
-$signingEvidence['trustProviderDocumentation'] = 'https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore'
+$signingEvidence['trustProviderDocumentation'] = 'https://learn.microsoft.com/en-us/windows/win32/api/cryptuiapi/nf-cryptuiapi-cryptuiwizimport'
+$signingEvidence['physicalStoreDocumentation'] = 'https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore'
 $signingEvidence['unprotectedFlagUsed'] = $false
 $signingEvidence['trustStoreOperations'] = @($trustOperations)
 if ($OriginalBuildRun) {
