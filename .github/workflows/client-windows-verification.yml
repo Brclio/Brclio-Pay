@@ -2,6 +2,11 @@
 name: Reverify pinned signed Windows installer
 on:
   workflow_dispatch:
+    inputs:
+      probeOnly:
+        description: Verify only temporary CurrentUser trust without NSIS installation
+        type: boolean
+        default: true
 permissions:
   contents: read
   actions: read
@@ -44,7 +49,11 @@ jobs:
           if ((Get-Item -LiteralPath $installer).Length -ne 111423264 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant() -cne 'd8227773e0689af5b1416dbb92c11091065bdc8fc670ada4e3aa65de72cd7986') { throw 'Original signed installer bytes mismatch.' }
           [ordered]@{schema=1;applicationSourceRevision=$run.head_sha;verifierRevision=$env:GITHUB_SHA;originalBuildRun=$run.html_url;originalArtifactId='12400106654';originalArtifactSha256='e499d23204dd03be307ae5e50867f677f5486a592061a92edddaa153a092215c';installerSha256='d8227773e0689af5b1416dbb92c11091065bdc8fc670ada4e3aa65de72cd7986';rebuildPerformed=$false;privateSigningIdentityLoaded=$false} | ConvertTo-Json | Set-Content -Encoding utf8 artifacts/windows-native/windows-build-origin.json
           Write-Host 'Pinned original source, archive, and signed installer bytes verified; no rebuild or signing.'
+      - name: Probe fixed public certificate with bounded physical CurrentUser trust
+        shell: pwsh
+        run: ./clients/ci/windows-trust-probe.ps1 -Installer 'dist-clients/Brclio-Pay-1.0.1-windows-x64-setup.exe' -OutputDirectory 'artifacts/windows-native'
       - name: Download exact published unsigned upgrade seed
+        if: ${{ !inputs.probeOnly }}
         shell: pwsh
         run: |
           $directory=Join-Path $env:RUNNER_TEMP 'brcliopay-seed'
@@ -53,6 +62,7 @@ jobs:
           Invoke-WebRequest -Uri 'https://github.com/Brclio/Brclio-Pay/releases/download/client-v1.0.0/Brclio-Pay-1.0.0-windows-x64-setup.exe' -OutFile $seed
           if ((Get-Item -LiteralPath $seed).Length -ne 111396777 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $seed).Hash.ToLowerInvariant() -cne '1656c5c3c622aca87f1427f62b6e800cdefbb23650c63e23ae500de1f176c588') { throw 'Published unsigned upgrade seed checksum mismatch.' }
       - name: Reverify bounded native installation, live smoke, profile retention and strict trust transitions
+        if: ${{ !inputs.probeOnly }}
         shell: pwsh
         run: ./clients/scripts/verify-windows-client.ps1 -SeedInstaller "${{ runner.temp }}/brcliopay-seed/Brclio-Pay-1.0.0-windows-x64-setup.exe" -Installer 'dist-clients/Brclio-Pay-1.0.1-windows-x64-setup.exe' -OutputDirectory 'artifacts/windows-native' -SeedVersion '1.0.0' -ApplicationSourceRevision '1d5c981361ace4fe49931ad40934043e180d3ad7' -OriginalBuildRun 'https://github.com/Brclio/Brclio-Pay/actions/runs/39717039848' -OriginalArtifactId '12400106654' -OriginalArtifactSha256 'e499d23204dd03be307ae5e50867f677f5486a592061a92edddaa153a092215c' -ExpectedInstallerSha256 'd8227773e0689af5b1416dbb92c11091065bdc8fc670ada4e3aa65de72cd7986'
       - name: Upload exact original signed installer and public native evidence

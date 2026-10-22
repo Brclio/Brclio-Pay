@@ -50,11 +50,11 @@ function Invoke-IsolatedUserTrust {
   $process = [System.Diagnostics.Process]::Start($info)
   try {
     $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(30000)) { $process.Kill($true); throw 'CurrentUser certificate operation exceeded its 30 second process deadline.' }
-    $output = $stdout.GetAwaiter().GetResult(); $null = $stderr.GetAwaiter().GetResult()
-    if ($process.ExitCode -ne 0) { throw ('CurrentUser certificate operation failed with exit code ' + $process.ExitCode + '.') }
+    if (-not $process.WaitForExit(30000)) { $process.Kill($true); $process.WaitForExit(); Write-Host ($stderr.GetAwaiter().GetResult()); throw 'CurrentUser certificate operation exceeded its 30 second process deadline.' }
+    $output = $stdout.GetAwaiter().GetResult(); $diagnostic = $stderr.GetAwaiter().GetResult()
+    if ($process.ExitCode -ne 0) { Write-Host $diagnostic; throw ('CurrentUser certificate operation failed with exit code ' + $process.ExitCode + '.') }
     $operationEvidence = $output | ConvertFrom-Json
-    if ($operationEvidence.schema -ne 1 -or $operationEvidence.scope -ne 'CurrentUser' -or $operationEvidence.provider -ne 'CERT_STORE_PROV_SYSTEM_REGISTRY_W' -or $operationEvidence.store -ne $Store -or $operationEvidence.operation -ne $Operation -or $operationEvidence.certificateSha256 -cne $expected.Identity.certificateSha256 -or $operationEvidence.unprotectedFlagUsed -ne $false -or $operationEvidence.globalTrustModified -ne $false) { throw 'Physical CurrentUser store operation provenance mismatch.' }
+    if ($operationEvidence.schema -ne 1 -or $operationEvidence.scope -ne 'CurrentUser' -or $operationEvidence.provider -ne 'CERT_STORE_PROV_REG' -or $operationEvidence.registryScope -ne 'HKCU' -or $operationEvidence.physicalStorePresenceVerified -ne $true -or $operationEvidence.store -ne $Store -or $operationEvidence.operation -ne $Operation -or $operationEvidence.certificateSha256 -cne $expected.Identity.certificateSha256 -or $operationEvidence.unprotectedFlagUsed -ne $false -or $operationEvidence.globalTrustModified -ne $false) { throw 'Physical CurrentUser store operation provenance mismatch.' }
   } finally { $process.Dispose() }
   $location = 'Cert:\CurrentUser\' + $Store + '\' + $expected.Identity.certificateThumbprintSha1
   $present = Test-Path -LiteralPath $location
@@ -65,7 +65,7 @@ function Invoke-IsolatedUserTrust {
     if ($digest -cne $expected.Identity.certificateSha256 -or $stored.HasPrivateKey) { throw 'Isolated CurrentUser trust entry does not match the fixed public certificate.' }
   } elseif ($present) { throw 'Isolated CurrentUser certificate cleanup did not remove the fixed trust entry.' }
   Write-VerificationProgress ('Completed bounded CurrentUser certificate operation: ' + $Operation + ' ' + $Store)
-  return [pscustomobject]@{ scope='CurrentUser'; provider='CERT_STORE_PROV_SYSTEM_REGISTRY_W'; store=$Store; operation=$Operation; verified=$true; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
+  return [pscustomobject]@{ scope='CurrentUser'; provider='CERT_STORE_PROV_REG'; store=$Store; operation=$Operation; verified=$true; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
 }
 
 function Install-Package([string]$Path) {
