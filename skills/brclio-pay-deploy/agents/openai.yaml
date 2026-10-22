@@ -1,0 +1,4 @@
+interface:
+  display_name: "Brclio Pay 部署"
+  short_description: "部署独立 Brclio Pay 支付中心，支持支付宝与微信及单渠道"
+  default_prompt: "使用 $brclio-pay-deploy 为我的账号部署 Brclio Pay，生成配置并核对渠道与授权。"

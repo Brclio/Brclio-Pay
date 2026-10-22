@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { deploymentSkillMarkdown, deploymentSkillZip, skillMarkdown, skillZip, SKILL_VARIANTS } from '../src/skill';
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map(folder => rm(folder, { recursive: true, force: true }))); });
@@ -14,7 +16,7 @@ const secureHeaders = {
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()', 'Strict-Transport-Security': 'max-age=31536000',
 };
-const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+const digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const expected = (paymentEnabled = false) => ({ version: '0.3.0', paymentMode: 'live', paymentEnabled,
   workerUrl: 'https://worker.example', publicUrl: 'https://pay.example', adminPageHash: digest(html), adminScriptHash: digest(javascript) });
 
@@ -32,8 +34,14 @@ describe('read-only deployment verification', () => {
   it('checks both published entry points, exact administrator assets and anonymous access boundaries without credentials or writes', async () => {
     const { runDeploymentPreflight } = await source();
     const fetcher = vi.fn(async (url: URL, options: RequestInit) => {
-      expect(options.method).toBe('GET');
-      expect(options.body).toBeUndefined();
+      if (url.pathname === '/api/admin/environment/value') {
+        expect(options.method).toBe('POST');
+        expect(options.body).toBe('{"name":"PAY_BASE_URL"}');
+        expect(new Headers(options.headers).get('Content-Type')).toBe('application/json');
+      } else {
+        expect(options.method).toBe('GET');
+        expect(options.body).toBeUndefined();
+      }
       expect(options.redirect).toBe('manual');
       expect(options.signal).toBeDefined();
       const headers = new Headers(options.headers);
@@ -44,7 +52,7 @@ describe('read-only deployment verification', () => {
     });
     const result = await runDeploymentPreflight({ expected: expected(), fetcher, attempts: 1, now: Date.UTC(2026, 9, 14, 17) });
     expect(result.deploymentPreflight).toBe(true);
-    expect(fetcher).toHaveBeenCalledTimes(14);
+    expect(fetcher).toHaveBeenCalledTimes(18);
     const requests = fetcher.mock.calls.map(([url]) => url);
     expect(new Set(requests.map(url => url.origin))).toEqual(new Set(['https://worker.example', 'https://pay.example']));
     expect(requests.filter(url => url.pathname === '/api/admin/reports/summary').map(url => url.search))
@@ -52,6 +60,8 @@ describe('read-only deployment verification', () => {
     expect(result.worker.anonymousSummary.status).toBe(401);
     expect(result.domain.anonymousOrders.status).toBe(401);
     expect(result.worker.staticSkill.status).toBe(404);
+    expect(result.worker.anonymousEnvironment.status).toBe(401);
+    expect(result.domain.anonymousEnvironmentValue.status).toBe(401);
     expect(result.worker.health.paymentEnabledMatches).toBe(true);
   });
 
@@ -94,6 +104,7 @@ describe('read-only deployment verification', () => {
       if (url.hostname === 'pay.example' && url.pathname === '/admin') return new Response(sensitive, { headers: { 'content-type': 'text/html' } });
       if (url.pathname === '/api/admin/reports/orders') return new Response(sensitive, { status: 200 });
       if (url.pathname === '/api/admin/skill.zip') return new Response(sensitive, { status: 302 });
+      if (url.pathname === '/api/admin/environment/value') return new Response(sensitive, { status: 200 });
       return response(url);
     };
     const result = await runDeploymentPreflight({ expected: expected(), fetcher, attempts: 1 });
@@ -102,6 +113,7 @@ describe('read-only deployment verification', () => {
     expect(result.domain.adminPage.passed).toBe(false);
     expect(result.domain.anonymousOrders.passed).toBe(false);
     expect(result.worker.anonymousSkill.status).toBe(302);
+    expect(result.worker.anonymousEnvironmentValue.passed).toBe(false);
     expect(JSON.stringify(result)).not.toContain(sensitive);
     function checkLeaves(value: unknown) {
       if (value && typeof value === 'object') for (const child of Object.values(value)) checkLeaves(child);
@@ -153,6 +165,48 @@ describe('read-only deployment verification', () => {
     }
     await expect(runDeploymentPreflight({ expected: { ...configured, publicAssets: { '/api/private.js': { hash: digest(javascript), type: 'js' } } }, fetcher })).rejects.toThrow();
   });
+
+  it('verifies all four public Skill ZIP and Markdown downloads and deployment docs against their exact released bytes', async () => {
+    const { loadDeploymentExpectations, runDeploymentPreflight } = await source();
+    const publicDownloads = loadDeploymentExpectations().publicDownloads;
+    const bodies: Record<string, string | Uint8Array> = {};
+    for (const name of [...SKILL_VARIANTS, 'brclio-pay-deploy'] as const) {
+      bodies[`/api/skills/${name}.zip`] = name === 'brclio-pay-deploy' ? deploymentSkillZip() : skillZip(name);
+      bodies[`/api/skills/${name}/SKILL.md`] = name === 'brclio-pay-deploy' ? deploymentSkillMarkdown() : skillMarkdown(name);
+    }
+    for (const name of ['deployment', 'environment-variables', 'merchant-setup']) {
+      bodies[`/docs/${name}.md`] = await readFile(fileURLToPath(new URL(`../public/docs/${name}.md`, import.meta.url).href), 'utf8');
+    }
+    expect(Object.keys(publicDownloads)).toHaveLength(11);
+    for (const [route, body] of Object.entries(bodies)) expect(publicDownloads[route].hash).toBe(digest(body));
+    const fetcher = vi.fn(async (url: URL) => {
+      const body = bodies[url.pathname];
+      if (body !== undefined) return new Response(body as BodyInit, { headers: { ...secureHeaders,
+        'Content-Type': url.pathname.endsWith('.zip') ? 'application/zip' : 'text/markdown;charset=utf-8',
+        ...(url.pathname.endsWith('.zip') ? { 'Content-Disposition': `attachment; filename="${url.pathname.split('/').at(-1)}"` } : {}),
+      } });
+      return response(url);
+    });
+    const configured = { ...expected(), publicDownloads };
+    const good = await runDeploymentPreflight({ expected: configured, fetcher, attempts: 1 });
+    expect(good.deploymentPreflight).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(40);
+    for (const change of ['bytes', 'mime', 'disposition', 'headers', 'missing']) {
+      const bad = await runDeploymentPreflight({ expected: configured, attempts: 1, fetcher: async (url: URL) => {
+        const route = change === 'bytes' ? '/docs/environment-variables.md' : '/api/skills/brclio-pay-deploy.zip';
+        if (url.pathname !== route) return fetcher(url);
+        const original = await fetcher(url);
+        const headers = new Headers(change === 'headers' ? {} : original.headers);
+        if (change === 'mime') headers.set('Content-Type', 'text/html');
+        if (change === 'disposition') headers.set('Content-Disposition', 'inline');
+        return new Response(change === 'bytes' ? 'stale release' : bodies[route] as BodyInit, { status: change === 'missing' ? 404 : 200, headers });
+      } });
+      expect(bad.deploymentPreflight).toBe(false);
+    }
+    for (const invalid of [{}, { ...publicDownloads, '/api/admin/private': { hash: digest('private'), type: 'markdown' } }]) {
+      await expect(runDeploymentPreflight({ expected: { ...expected(), publicDownloads: invalid }, fetcher })).rejects.toThrow('Invalid public download verification');
+    }
+  });
 });
 
 describe('deployment expectation loading', () => {
@@ -160,16 +214,25 @@ describe('deployment expectation loading', () => {
     const { loadDeploymentExpectations } = await source();
     const root = await mkdtemp(path.join(tmpdir(), 'brclio-deploy-test-')); temporary.push(root);
     await mkdir(path.join(root, 'public'));
+    await mkdir(path.join(root, 'public/docs'));
+    await mkdir(path.join(root, 'src'));
     await writeFile(path.join(root, 'package.json'), '{"version":"1.2.3"}');
     await writeFile(path.join(root, 'wrangler.jsonc'), '// Deployment configuration\n{"vars":{"PAY_BASE_URL":"https://pay.example", "PAYMENT_MODE":"sandbox", "PAYMENT_ENABLED":"true",},}');
     await writeFile(path.join(root, 'public/admin.html'), html);
     await writeFile(path.join(root, 'public/admin.js'), javascript);
     await writeFile(path.join(root, 'public/checkout.html'), html);
     for (const name of ['styles.css', 'admin.css', 'checkout.js', 'landing.js']) await writeFile(path.join(root, 'public', name), name.endsWith('.css') ? 'body{}' : javascript);
+    for (const name of ['deployment', 'environment-variables', 'merchant-setup']) await writeFile(path.join(root, 'public/docs', `${name}.md`), `# ${name}\n`);
+    const variants = Object.fromEntries(SKILL_VARIANTS.map(name => [name, { [`${name}/SKILL.md`]: `# ${name}\n` }]));
+    await writeFile(path.join(root, 'src/skill-data.ts'), `export const skillVariants: Record<string, Record<string, string>> = ${JSON.stringify(variants)};\nexport const deploymentSkillFiles: Record<string, string> = {"brclio-pay-deploy/SKILL.md":"# deployment"};\n`);
     expect(loadDeploymentExpectations(root)).toMatchObject({ version: '1.2.3', paymentMode: 'sandbox', paymentEnabled: true,
       publicUrl: 'https://pay.example', workerUrl: 'https://brclio-pay-unified.aiyuechuang.workers.dev',
       adminPageHash: digest(html), adminScriptHash: digest(javascript) });
     expect(loadDeploymentExpectations(root).publicAssets['/styles.css']).toEqual({ hash: digest('body{}'), type: 'css' });
+    expect(loadDeploymentExpectations(root).publicDownloads['/docs/deployment.md']).toEqual({ hash: digest('# deployment\n'), type: 'markdown' });
+    expect(loadDeploymentExpectations(root).publicDownloads['/api/skills/brclio-pay-deploy/SKILL.md']).toEqual({ hash: digest('# deployment'), type: 'markdown' });
+    await writeFile(path.join(root, 'src/skill-data.ts'), 'export const skillVariants = process.env;');
+    expect(() => loadDeploymentExpectations(root)).toThrow('Invalid public Skill bundle');
     await writeFile(path.join(root, 'wrangler.jsonc'), '{"vars":{"PAY_BASE_URL":"https://pay.example","PAYMENT_MODE":"live","PAYMENT_ENABLED":"not-boolean"}}');
     expect(() => loadDeploymentExpectations(root)).toThrow();
   });

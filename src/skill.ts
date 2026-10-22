@@ -1,4 +1,4 @@
-import { skillVariants } from './skill-data';
+import { deploymentSkillFiles, skillVariants } from './skill-data';
 
 export const SKILL_VARIANTS = ['brclio-pay-integrate', 'brclio-alipay-integrate', 'brclio-wechatpay-integrate'] as const;
 export type SkillVariant = typeof SKILL_VARIANTS[number];
@@ -12,6 +12,14 @@ function selectedFiles(variant: SkillVariant): Record<string, string> {
 
 export function skillMarkdown(variant: SkillVariant = 'brclio-pay-integrate'): string {
   return selectedFiles(variant)[`${variant}/SKILL.md`];
+}
+
+/** Infrastructure deployment never accepts or carries a scoped product grant. */
+export function deploymentSkillMarkdown(): string {
+  return deploymentSkillFiles['brclio-pay-deploy/SKILL.md'];
+}
+export function deploymentSkillZip(): Uint8Array {
+  return archiveZip('brclio-pay-deploy', deploymentSkillFiles);
 }
 
 export interface IntegrationPromptOptions {
@@ -87,11 +95,15 @@ function header(length: number): { bytes: Uint8Array; view: DataView } {
 
 /** Small deterministic UTF-8 ZIP using method 0 (stored); no runtime filesystem. */
 export function skillZip(variant: SkillVariant = 'brclio-pay-integrate'): Uint8Array {
+  return archiveZip(variant, selectedFiles(variant));
+}
+
+function archiveZip(variant: string, files: Record<string, string>): Uint8Array {
   const encoder = new TextEncoder();
   const chunks: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let offset = 0;
-  const entries = Object.entries(selectedFiles(variant)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  const entries = Object.entries(files).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
   for (const [name, value] of entries) {
     if (!name.startsWith(`${variant}/`) || !/^[A-Za-z0-9_./-]+$/.test(name) || name.split('/').some(part => part === '..' || part === '')) throw new TypeError('Unsafe skill archive path');
     const filename = encoder.encode(name);

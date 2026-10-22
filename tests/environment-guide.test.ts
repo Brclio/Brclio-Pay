@@ -30,15 +30,34 @@ describe('administrator environment guide',()=>{
     const storage=store(),service=vi.fn();await expect(handleAdmin(request(undefined,false),env,storage,{service})).rejects.toMatchObject({status:401});
     expect(storage.readJson).not.toHaveBeenCalled();expect(storage.transaction).not.toHaveBeenCalled();expect(service).not.toHaveBeenCalled();
   });
-  it('returns private-repository documentation and presence only without reading actual values into the response',async()=>{
+  it('returns documentation and public runtime values while withholding credentials',async()=>{
     const storage=store(),response=await handleAdmin(request(),env,storage),body=await response.text(),data=JSON.parse(body);
     expect(response.status).toBe(200);expect(data.document).toEqual(guide());
-    expect(data.variables).toEqual([{name:'CHECKOUT_SECRET',configured:true,storageType:'Text'},
-      {name:'ALIPAY_GATEWAY',configured:false,storageType:'Text'},{name:'ASSETS',configured:true,storageType:'binding'}]);
+    expect(data.variables).toEqual([{name:'CHECKOUT_SECRET',configured:true,canReveal:true,storageType:'runtime',disclosure:'protected'},
+      {name:'ALIPAY_GATEWAY',configured:false,canReveal:true,storageType:'runtime',disclosure:'public',value:'  '},
+      {name:'ASSETS',configured:true,canReveal:false,storageType:'binding',disclosure:'binding'}]);
     expect(data.source).toMatchObject({repository:'BrclioData/BrclioPay-Data',path:ENVIRONMENT_GUIDE_PATH,revision:sha256(JSON.stringify(guide()))});
-    expect(data.storageTypeBasis).toBe('maintenance-convention');
+    expect(data.storageTypeBasis).toBe('runtime-binding-only');
     for(const secret of [env.CHECKOUT_SECRET,env.ADMIN_SESSION_SECRET!,env.ADMIN_PASSWORD_PEPPER!,env.ADMIN_PASSWORD_HASH!])expect(body).not.toContain(secret);
     expect(storage.readJson).toHaveBeenCalledWith(ENVIRONMENT_GUIDE_PATH);expect(storage.transaction).not.toHaveBeenCalled();
+  });
+  it('does not let editable sensitive tags disclose credentials, arbitrary bindings or product configuration',async()=>{
+    const document=guide();
+    const secretNames=['CHECKOUT_SECRET','GITHUB_APP_PRIVATE_KEY','GITHUB_TOKEN','CLIENTS_JSON','ADMIN_EMAIL','ADMIN_PASSWORD_HASH','ADMIN_PASSWORD_PEPPER','ADMIN_SESSION_SECRET','REGISTRY_ENCRYPTION_KEY','UNKNOWN_RUNTIME_BINDING'];
+    document.groups[0].variables=[...secretNames.map(name=>({...variable,name,sensitive:false})),{...variable,name:'PAY_BASE_URL',generation:'用户选定的 HTTPS 域名',scope:'所有部署'}];
+    const runtime={...env,GITHUB_APP_PRIVATE_KEY:'private-key-material',GITHUB_TOKEN:'repository-token-material',CLIENTS_JSON:'[{"apiSecret":"product-private-secret"}]',
+      REGISTRY_ENCRYPTION_KEY:'legacy-encryption-material',UNKNOWN_RUNTIME_BINDING:'not-allowed-to-be-returned'};
+    const result=await environmentGuide(runtime,store(document)),serialized=JSON.stringify(result);
+    for(const name of secretNames){
+      expect(result.variables.find(item=>item.name===name)).not.toHaveProperty('value');
+      expect(result.variables.find(item=>item.name===name)).toHaveProperty('canReveal',name!=='UNKNOWN_RUNTIME_BINDING');
+      expect(serialized).not.toContain((runtime as unknown as Record<string,string>)[name]);
+    }
+    expect(result.variables.find(item=>item.name==='PAY_BASE_URL')).toMatchObject({value:env.PAY_BASE_URL,disclosure:'public'});
+  });
+  it('reports the selected private data repository and branch for independent deployments',async()=>{
+    const result=await environmentGuide({...env,GITHUB_REPOSITORY:'example/private-pay-data',GITHUB_BRANCH:'release/data'},store());
+    expect(result.source).toMatchObject({repository:'example/private-pay-data',url:'https://github.com/example/private-pay-data/blob/release%2Fdata/maintenance/environment/guide.json'});
   });
   it('observes an edited guide from storage without a code deployment or static fallback',async()=>{
     const storage=store(),first=await environmentGuide(env,storage),next={...guide(),title:'更新后的说明'};
@@ -66,6 +85,13 @@ describe('administrator environment guide',()=>{
     const result=await environmentGuide(env,store(seed));
     expect(result.variables.filter(item=>item.storageType==='binding').map(item=>item.name).sort())
       .toEqual(['ASSETS','ADMIN_LOGIN_LIMITER','INTEGRATION_LIMITER','PAYMENT_API_LIMITER'].sort());
-    expect(result.variables.filter(item=>item.storageType==='Text')).toHaveLength(31);
+    expect(result.variables.filter(item=>item.storageType==='runtime')).toHaveLength(33);
+    expect(result.variables.filter(item=>item.canReveal)).toHaveLength(33);
+    expect(result.variables.filter(item=>item.storageType==='binding').every(item=>!item.canReveal)).toBe(true);
+    const envSource=readFileSync('src/types.ts','utf8').split('export interface Env {')[1].split('\n}')[0];
+    for(const match of envSource.matchAll(/^  ([A-Z][A-Z0-9_]*)\??:/gm))expect(names).toContain(match[1]);
+    for(const item of seed.groups.flatMap(group=>group.variables)){
+      expect(item.generation?.trim().length).toBeGreaterThan(0);expect(item.scope?.trim().length).toBeGreaterThan(0);
+    }
   });
 });

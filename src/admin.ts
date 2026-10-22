@@ -1,14 +1,14 @@
 import {adminLogin,adminLogout,adminSession,requireAdminMutation} from './admin-auth';
-import {clients,HttpError,requireThat} from './config';
+import {clients,HttpError,paymentChannels,requireThat} from './config';
 import {jsonBody} from './http';
 import {Registry,type ClientConfig} from './registry';
 import {makeIntegrationPrompt,skillMarkdown,skillZip,type SkillVariant} from './skill';
 import type {Env,PaymentProvider,Store} from './types';
 import {Reporting,type OrderStatus} from './reporting';
 import {Payments,type AdminOrderAction,type OrderActionInput} from './payments';
-import {createAlipay} from './alipay';
+import {paymentAdapters} from './providers';
 import {hmacSha256} from './crypto';
-import {environmentGuide} from './environment';
+import {environmentGuide,environmentValue} from './environment';
 
 export interface AdminPaymentOptions {
   service?:()=>Promise<Payments>;
@@ -41,6 +41,12 @@ export async function handleAdmin(request:Request,env:Env,store:Store,paymentOpt
     requireThat(request.method==='GET',405,'METHOD_NOT_ALLOWED','请求方法不支持');
     return Response.json(await environmentGuide(env,store));
   }
+  if(pathname==='/api/admin/environment/value') {
+    requireThat(request.method==='POST',405,'METHOD_NOT_ALLOWED','请求方法不支持');
+    const value=environmentValue(env,await jsonBody(request,256));
+    return Response.json(value,{headers:{'Cache-Control':'no-store, private','Pragma':'no-cache','Referrer-Policy':'no-referrer',
+      'X-Content-Type-Options':'nosniff','Vary':'Cookie, Origin'}});
+  }
   if(pathname==='/api/admin/session' && request.method==='GET')return Response.json({user:{email:identity.email},csrfToken:identity.csrfToken});
   if(pathname==='/api/admin/logout' && request.method==='POST')return adminLogout();
   if(pathname==='/api/admin/skill' && request.method==='GET')return Response.json({content:skillMarkdown(variant)});
@@ -67,13 +73,17 @@ export async function handleAdmin(request:Request,env:Env,store:Store,paymentOpt
     }
     // Do not initialize a gateway or read the registry before authentication,
     // CSRF, method and input validation have succeeded.
-    const payments=paymentOptions.service ? await paymentOptions.service() : new Payments(
-      {...env,CLIENTS_JSON:JSON.stringify(await new Registry(env,store).resolveClients())},store,createAlipay(env));
+    const resolvePayments=async()=>{
+      const effective={...env,CLIENTS_JSON:JSON.stringify(await new Registry(env,store).resolveClients())},adapters=paymentAdapters(effective);
+      return new Payments(effective,store,adapters.alipay,Date.now,undefined,adapters.wechat);
+    };
+    const payments=paymentOptions.service ? await paymentOptions.service() : await resolvePayments();
     const original=await payments.order(id);
     const client=clients(payments.env).find(item=>item.id===original.clientId);
     const detail=action ? await payments.adminAction(id,action as AdminOrderAction,input!,identity.email,client) : await payments.adminDetail(id);
     detail.actions.reopen=detail.actions.reopen && payments.env.PAYMENT_ENABLED==='true' && !!client && client.enabled!==false
-      && Object.hasOwn(client.skus,original.sku) && client.skus[original.sku].enabled!==false;
+      && Object.hasOwn(client.skus,original.sku) && client.skus[original.sku].enabled!==false
+      && (client.providers??['alipay']).includes(original.provider??'alipay')&&paymentChannels(payments.env,original.provider??'alipay').length>0;
     if(action && detail.order.status==='PAID' && client) {
       const delivery=payments.deliver(`evt_${id}`,client).catch(()=>console.warn('webhook_delivery_failed'));
       if(paymentOptions.waitUntil)paymentOptions.waitUntil(delivery);else await delivery;

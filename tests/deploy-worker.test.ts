@@ -18,4 +18,14 @@ describe('daily deployment preserves dashboard configuration',()=>{
     const {deploymentConfig}=await source();
     expect(()=>deploymentConfig({name:'unrelated;command',account_id:'x',main:'index.ts',assets:{directory:'public'}})).toThrow();
   });
+  it('selects an independent installation configuration without forwarding runtime arguments',async()=>{
+    const {deploymentArguments,deploymentConfig}=await source();
+    expect(deploymentArguments([])).toEqual({config:'wrangler.jsonc',dryRun:false});
+    expect(deploymentArguments(['--config','secrets/setup-generated/wrangler.json','--dry-run'])).toEqual({config:'secrets/setup-generated/wrangler.json',dryRun:true});
+    expect(()=>deploymentArguments(['--config'])).toThrow();
+    expect(()=>deploymentArguments(['--var','PAYMENT_ENABLED:true'])).toThrow();
+    const config=deploymentConfig({name:'my-independent-pay',account_id:'b'.repeat(32),main:'/fixture/src/index.ts',assets:{directory:'/fixture/public'},
+      vars:{PAYMENT_ENABLED:'false',WECHAT_CHANNELS:'native'}});
+    expect(config.name).toBe('my-independent-pay');expect(config.account_id).toBe('b'.repeat(32));expect(config.vars).toEqual({});
+  });
 });

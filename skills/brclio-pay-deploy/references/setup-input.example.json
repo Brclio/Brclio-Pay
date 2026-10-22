@@ -1,0 +1,34 @@
+{
+  "providerMode": "dual",
+  "cloudflare": {
+    "accountId": "<your-cloudflare-account-id-32-lowercase-hex>",
+    "workerName": "my-brclio-pay",
+    "baseUrl": "https://pay.example.com",
+    "pagesProjectName": "my-brclio-pay-gateway"
+  },
+  "github": {
+    "appId": "<your-github-app-id>",
+    "installationId": "<your-github-app-installation-id>",
+    "repository": "your-private-data-owner/your-pay-data",
+    "branch": "main",
+    "privateKeyFile": "./merchant/github-app-private.pem"
+  },
+  "admin": {
+    "email": "admin@example.com"
+  },
+  "alipay": {
+    "appId": "<your-alipay-app-id>",
+    "sellerId": "<your-alipay-seller-id>",
+    "privateKeyFile": "./merchant/alipay-app-private.pem",
+    "publicKeyFile": "./merchant/alipay-platform-public.pem"
+  },
+  "wechat": {
+    "merchantId": "<your-wechat-merchant-id>",
+    "appId": "<your-wechat-app-id>",
+    "serialNo": "<your-merchant-certificate-serial-number>",
+    "privateKeyFile": "./merchant/wechat-merchant-private.pem",
+    "apiV3KeyFile": "./merchant/wechat-api-v3-key.txt",
+    "publicKeyId": "PUB_KEY_ID_<your-wechat-pay-public-key-id>",
+    "publicKeyFile": "./merchant/wechat-pay-public.pem"
+  }
+}

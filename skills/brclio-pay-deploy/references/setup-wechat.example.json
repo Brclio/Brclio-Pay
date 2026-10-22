@@ -1,0 +1,25 @@
+{
+  "providerMode": "wechat",
+  "cloudflare": {
+    "accountId": "<your-cloudflare-account-id-32-lowercase-hex>",
+    "workerName": "my-brclio-wechat",
+    "baseUrl": "https://pay.example.com"
+  },
+  "github": {
+    "appId": "<your-github-app-id>",
+    "installationId": "<your-github-app-installation-id>",
+    "repository": "your-private-data-owner/your-pay-data",
+    "branch": "main",
+    "privateKeyFile": "./merchant/github-app-private.pem"
+  },
+  "admin": {"email": "admin@example.com"},
+  "wechat": {
+    "merchantId": "<your-wechat-merchant-id>",
+    "appId": "<your-wechat-app-id>",
+    "serialNo": "<your-merchant-certificate-serial-number>",
+    "privateKeyFile": "./merchant/wechat-merchant-private.pem",
+    "apiV3KeyFile": "./merchant/wechat-api-v3-key.txt",
+    "publicKeyId": "PUB_KEY_ID_<your-wechat-pay-public-key-id>",
+    "publicKeyFile": "./merchant/wechat-pay-public.pem"
+  }
+}

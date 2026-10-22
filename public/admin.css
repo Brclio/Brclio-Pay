@@ -349,6 +349,8 @@ select.admin-input { appearance: auto; cursor: pointer; }
 .bills-table .order-identity small { color: #8b6120; }
 .bill-trade-number { max-width: 240px; overflow-wrap: anywhere; font-size: .65rem; line-height: 1.9; }
 .environment-source { margin-bottom: 17px; overflow-wrap: anywhere; }
+.environment-deployment-links { display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: baseline; padding: 16px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); font-size: .74rem; }
+.environment-deployment-links > span { color: var(--blue-deep); font-weight: 600; }
 .environment-source .quiet-link { display: inline-block; margin: 5px 0 0 14px; font-size: .67rem; }
 .environment-intro { display: grid; gap: 9px; }
 .environment-filters { display: grid; grid-template-columns: minmax(220px, 1.7fr) minmax(180px, 1fr); gap: 20px; margin: 22px 0 16px; }
@@ -367,6 +369,9 @@ select.admin-input { appearance: auto; cursor: pointer; }
 .environment-fields > div:nth-child(n+3) { grid-column: 1 / -1; }
 .environment-fields dt { color: var(--ink-faint); font-size: .65rem; margin-bottom: 5px; }
 .environment-fields dd { color: var(--ink-light); font-size: .73rem; line-height: 1.95; white-space: pre-wrap; overflow-wrap: anywhere; }
+.environment-reveal-button { display: inline-block; margin-top: 10px; }
+.environment-revealed-field { grid-column: 1 / -1; }
+.environment-revealed-field dd { max-height: 260px; overflow: auto; padding: 10px 13px; background: var(--cream); border: 1px solid var(--border); border-radius: 4px; user-select: text; }
 .environment-notes { display: grid; gap: 10px; padding: 20px 23px; margin-top: 29px; background: var(--yellow-soft); border-radius: 6px; }
 .environment-notes:empty { display: none; }
 .environment-notes .field-hint { margin-top: 0; color: #6c5500; }

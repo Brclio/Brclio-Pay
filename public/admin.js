@@ -75,6 +75,10 @@
   let environmentLoaded = false;
   let environmentGuide = null;
   let environmentStatuses = new Map();
+  let revealedEnvironmentValue = null;
+  let pendingEnvironmentValue = null;
+  let environmentRevealEpoch = 0;
+  let environmentRevealTimer = null;
   // Data stays in this document's memory; never persist it in browser storage.
   const readCache = new Map(), pendingReads = new Map(), readTimes = new Map();
   const CACHE_LIMIT = 100, CACHE_BYTES = 4 * 1024 * 1024;
@@ -84,7 +88,7 @@
     products: ['商品与价格', '调整价格、销售状态和权益说明。'], ai: ['AI 接入', '复制完整任务，让 AI 对接产品与支付中心。'],
     platforms: ['平台与授权', '管理回调、返回域名和单平台短期授权。'],
     bills: ['支付账单', '分别查看支付宝、微信每月确认到账与产品通知。'],
-    environment: ['环境变量', '从私有数据仓库读取维护说明，核对当前配置状态。'],
+    environment: ['环境变量', '查看运行配置说明，按需读取当前部署的实际值。'],
   };
 
   const skillLabels = { 'brclio-pay-integrate': '支付宝 + 微信', 'brclio-alipay-integrate': '仅支付宝', 'brclio-wechatpay-integrate': '仅微信' };
@@ -165,6 +169,7 @@
       : '数据读取后保存在当前页面，切换与翻页优先复用；点击“刷新数据”获取最新内容。';
   }
   function invalidateReadCache() {
+    clearEnvironmentValue();
     cacheEpoch++; readCache.clear(); pendingReads.clear(); readTimes.clear(); cacheBytes = 0;
     clientsLoaded = false; grantsLoaded = false; summaryLoaded = false; ordersLoaded = false;
     billsLoaded = false; auditLoaded = false; environmentLoaded = false;
@@ -685,6 +690,7 @@
   }
 
   function activatePage(name, updateHash = true) {
+    clearEnvironmentValue();
     activePage = Object.hasOwn(pageTitles, name) ? name : 'overview';
     if (activePage !== 'orders') clearOrderCheckout();
     document.querySelectorAll('[data-admin-page]').forEach((page) => { page.hidden = page.dataset.adminPage !== activePage; });
@@ -1119,6 +1125,46 @@
   function environmentText(value) {
     return typeof value === 'string' ? value : Array.isArray(value) ? value.filter((item) => typeof item === 'string').join('\n') : '';
   }
+  const publicEnvironmentNames = new Set(['PAY_BASE_URL', 'PAYMENT_MODE', 'PAYMENT_ENABLED', 'ALIPAY_CHANNELS', 'ALIPAY_APP_ID', 'ALIPAY_SELLER_ID', 'ALIPAY_GATEWAY',
+    'WECHAT_MCH_ID', 'WECHAT_APP_ID', 'WECHAT_SERIAL_NO', 'WECHAT_PUBLIC_KEY_ID', 'WECHAT_CHANNELS', 'GITHUB_APP_ID', 'GITHUB_APP_INSTALLATION_ID',
+    'GITHUB_REPOSITORY', 'GITHUB_BRANCH', 'REGISTRY_STORAGE_MODE', 'LEGACY_WECHAT_BASE_URL']);
+  function clearEnvironmentValue() {
+    const wasRevealed = revealedEnvironmentValue !== null || pendingEnvironmentValue !== null;
+    environmentRevealEpoch++;
+    revealedEnvironmentValue = null;
+    pendingEnvironmentValue = null;
+    if (environmentRevealTimer !== null) window.clearTimeout(environmentRevealTimer);
+    environmentRevealTimer = null;
+    if (wasRevealed && environmentGuide) renderEnvironment();
+  }
+  async function revealEnvironmentValue(name) {
+    if (revealedEnvironmentValue?.name === name || pendingEnvironmentValue === name) { clearEnvironmentValue(); return; }
+    if (busy || !session || activePage !== 'environment') return;
+    clearEnvironmentValue();
+    const epoch = environmentRevealEpoch, identity = session;
+    pendingEnvironmentValue = name;
+    renderEnvironment();
+    try {
+      // Deliberately bypass the GET read cache: this value lives only in the
+      // currently revealed row and is never persisted or logged.
+      const result = await networkRequest('/environment/value', { method: 'POST', body: { name } });
+      if (epoch !== environmentRevealEpoch || session !== identity || activePage !== 'environment') return;
+      if (document.hidden) { clearEnvironmentValue(); return; }
+      if (result.name !== name || typeof result.configured !== 'boolean' || !(result.value === null || typeof result.value === 'string')
+        || typeof result.retrievedAt !== 'string' || !Number.isFinite(Date.parse(result.retrievedAt))) {
+        throw new ApiError(502, 'INVALID_ENVIRONMENT_VALUE', '运行值读取结果不完整，请重新查看。');
+      }
+      revealedEnvironmentValue = { name, value: result.value, retrievedAt: result.retrievedAt };
+      const state = environmentStatuses.get(name);
+      if (state) state.configured = result.configured;
+      pendingEnvironmentValue = null;
+      environmentRevealTimer = window.setTimeout(clearEnvironmentValue, 60000);
+      renderEnvironment(); message(ui.environmentMessage, '');
+    } catch (error) {
+      if (epoch !== environmentRevealEpoch || session !== identity || activePage !== 'environment') return;
+      clearEnvironmentValue(); report(error, ui.environmentMessage);
+    }
+  }
   function renderEnvironment() {
     if (!environmentGuide) return;
     const term = ui.environmentSearch.value.trim().toLocaleLowerCase(), groupId = ui.environmentGroup.value;
@@ -1137,20 +1183,42 @@
         title.append(element('span', `admin-badge${state?.configured ? ' paid-status' : ''}`, state ? state.configured ? '已配置' : '未配置' : '状态未提供'));
         article.append(title, element('p', 'environment-description', variable.description));
         const fields = element('dl', 'environment-fields');
-        const values = [['维护方式', state?.storageType === 'binding' ? 'Cloudflare 资源绑定' : state?.storageType === 'Text' ? 'Cloudflare Text（明文）' : '请查配置位置'],
-          ['是否必需', variable.required ? '必需' : '按使用场景配置'], ['配置位置', variable.location], ['修改与生效', variable.changeNotes], ['维护注意', variable.maintenance], ['格式示例', variable.example]];
+        const revealed = revealedEnvironmentValue?.name === variable.name ? revealedEnvironmentValue : null;
+        const pending = pendingEnvironmentValue === variable.name;
+        const currentValue = revealed ? revealed.value === null ? '未设置' : revealed.value.length ? revealed.value : '空字符串（""）'
+          : pending ? '正在读取实际值…'
+          : state?.storageType === 'binding' ? '资源绑定，无文本值'
+          : publicEnvironmentNames.has(variable.name) && state?.disclosure === 'public' ? typeof state.value === 'string' && state.value.length ? state.value : '未设置（空值）'
+          : state?.configured ? '已配置 · 点击下方按钮查看实际值' : '未配置';
+        const values = [['当前部署值', currentValue], ['维护方式', state?.storageType === 'binding' ? 'Cloudflare 资源绑定' : 'Cloudflare 服务端变量（Text / Secret，以控制台为准）'],
+          ['适用范围', variable.scope || (variable.required ? '该分组启用时必需' : '按使用场景配置')], ['如何生成或获取', variable.generation || variable.maintenance],
+          ['配置位置', variable.location], ['修改与生效', variable.changeNotes], ['维护注意', variable.maintenance], ['格式示例', variable.example]];
         for (const [label, value] of values) {
           if (!environmentText(value)) continue;
-          const row = element('div', ''); row.append(element('dt', '', label), element('dd', '', environmentText(value))); fields.append(row);
+          const row = element('div', label === '当前部署值' && revealed ? 'environment-revealed-field' : '');
+          row.append(element('dt', '', label), element('dd', '', environmentText(value)));
+          if (label === '当前部署值' && state?.canReveal) {
+            const revealButton = element('button', 'admin-text-button environment-reveal-button', revealed ? '隐藏实际值' : pending ? '取消查看' : '显示实际值');
+            revealButton.type = 'button'; revealButton.setAttribute('data-environment-name', variable.name);
+            revealButton.setAttribute('aria-expanded', String(!!revealed));
+            revealButton.disabled = busy && !revealed && !pending;
+            // Hide must remain available while another request is pending.
+            if (!revealed && !pending) revealButton.setAttribute('data-busy-lock', '');
+            revealButton.addEventListener('click', () => { void revealEnvironmentValue(variable.name); });
+            row.append(revealButton);
+            if (revealed) row.append(element('p', 'field-hint', `当前部署实时读取 · ${orderTime(revealed.retrievedAt)} · 60 秒后自动隐藏`));
+          }
+          fields.append(row);
         }
         article.append(fields); section.append(article);
       }
       return section;
     }).filter(Boolean);
     ui.environmentGroups.replaceChildren(...sections); ui.environmentEmpty.hidden = visibleCount > 0;
-    ui.environmentCount.textContent = `显示 ${count(visibleCount)} 个变量 · 配置状态仅检查是否已提供，维护方式按维护约定显示`;
+    ui.environmentCount.textContent = `显示 ${count(visibleCount)} 个变量 · 点击“显示实际值”实时读取，60 秒后自动隐藏；资源绑定没有文本值`;
   }
   async function loadEnvironment({ fresh = false } = {}) {
+    clearEnvironmentValue();
     environmentLoaded = false; environmentGuide = null; environmentStatuses.clear();
     ui.environmentGroups.replaceChildren(); ui.environmentIntro.replaceChildren(); ui.environmentNotes.replaceChildren();
     ui.environmentSource.textContent = ''; ui.environmentCount.textContent = ''; ui.environmentEmpty.hidden = true;
@@ -1166,15 +1234,18 @@
         for (const variable of group.variables) if (!variable || !['name', 'label', 'description', 'location', 'changeNotes', 'maintenance', 'example'].every((key) => typeof variable[key] === 'string')) throw new ApiError(502, 'INVALID_ENVIRONMENT_GUIDE', '环境变量条目不完整，请检查数据仓库说明。');
       }
       environmentGuide = guide;
-      // Deliberately retain only status fields; runtime values never enter the page.
-      environmentStatuses = new Map(result.variables.filter((item) => item && typeof item.name === 'string' && typeof item.configured === 'boolean' && ['Text', 'binding'].includes(item.storageType))
-        .map((item) => [item.name, { configured: item.configured, storageType: item.storageType }]));
+      // The guide/cache never retains protected values. Only an explicit reveal
+      // POST can populate the separately cleared temporary row.
+      environmentStatuses = new Map(result.variables.filter((item) => item && typeof item.name === 'string' && typeof item.configured === 'boolean' && ['Text', 'runtime', 'binding'].includes(item.storageType))
+        .map((item) => [item.name, { configured: item.configured, storageType: item.storageType, disclosure: item.disclosure, canReveal: item.canReveal === true,
+          ...(publicEnvironmentNames.has(item.name) && item.disclosure === 'public' && typeof item.value === 'string' ? { value: item.value } : {}) }]));
       ui.environmentTitle.textContent = guide.title;
       ui.environmentSource.textContent = `说明来源：${result.source.repository} / ${result.source.path} · 更新于 ${orderTime(guide.updatedAt)} · 修订 ${result.source.revision.slice(0, 12)}`;
       if (typeof result.source.url === 'string') {
         let sourceUrl;
         try { sourceUrl = new URL(result.source.url); } catch { /* The source label remains available without a link. */ }
-        if (sourceUrl?.protocol === 'https:' && !sourceUrl.username && !sourceUrl.password && sourceUrl.hostname === 'github.com' && sourceUrl.pathname.startsWith('/BrclioData/BrclioPay-Data/blob/')) {
+        if (sourceUrl?.protocol === 'https:' && !sourceUrl.username && !sourceUrl.password && sourceUrl.hostname === 'github.com'
+          && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(result.source.repository) && sourceUrl.pathname.startsWith(`/${result.source.repository}/blob/`)) {
           const link = element('a', 'quiet-link', '在数据仓库查看说明 ↗'); link.href = sourceUrl.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; ui.environmentSource.append(link);
         }
       }
@@ -1228,6 +1299,7 @@
     });
   });
   ui.logoutButton.addEventListener('click', () => {
+    clearEnvironmentValue();
     void operation(ui.logoutButton, '正在退出…', async () => {
       try { await request('/logout', { method: 'POST' }); showLogin(); }
       catch (error) { report(error, ui.globalMessage); }
@@ -1345,9 +1417,9 @@
   });
   ui.exportBillsButton.addEventListener('click', () => { void operation(ui.exportBillsButton, '正在导出完整月份…', exportBills); });
   ui.reloadEnvironmentButton.addEventListener('click', () => { void operation(ui.reloadEnvironmentButton, '正在读取…', () => loadEnvironment({ fresh: true })); });
-  ui.environmentFilters.addEventListener('submit', (event) => { event.preventDefault(); renderEnvironment(); });
-  ui.environmentSearch.addEventListener('input', renderEnvironment);
-  ui.environmentGroup.addEventListener('change', renderEnvironment);
+  ui.environmentFilters.addEventListener('submit', (event) => { event.preventDefault(); clearEnvironmentValue(); renderEnvironment(); });
+  ui.environmentSearch.addEventListener('input', () => { clearEnvironmentValue(); renderEnvironment(); });
+  ui.environmentGroup.addEventListener('change', () => { clearEnvironmentValue(); renderEnvironment(); });
   ui.closeOrderDetailsButton.addEventListener('click', () => { clearOrderDetails(); syncControls(); });
   ui.reloadOrderDetailsButton.addEventListener('click', () => { const id = selectedOrderId; if (id) void operation(ui.reloadOrderDetailsButton, '正在刷新…', () => loadOrderDetails(id)); });
   ui.closePaymentOrderButton.addEventListener('click', () => beginOrderAction('close'));
@@ -1375,6 +1447,7 @@
     });
   });
   window.addEventListener('pagehide', () => { clearOrderCheckout(); clearOutput(); invalidateReadCache(); });
+  document.addEventListener?.('visibilitychange', () => { if (document.hidden) clearEnvironmentValue(); });
   ui.rebuildButton.addEventListener('click', () => {
     void operation(ui.rebuildButton, '正在补建本批…', async () => {
       try {

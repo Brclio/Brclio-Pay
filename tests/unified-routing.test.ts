@@ -16,6 +16,7 @@ class MemoryStore implements Store {
 }
 async function fixture(){
   const env:Env={ASSETS:{fetch:async()=>new Response('asset')} as unknown as Fetcher,PAY_BASE_URL:base,PAYMENT_MODE:'live',PAYMENT_ENABLED:'true',ALIPAY_CHANNELS:'page,wap',ALIPAY_APP_ID:'2021007109602288',ALIPAY_PRIVATE_KEY:'fixture-private',ALIPAY_PUBLIC_KEY:'fixture-public',ALIPAY_SELLER_ID:'2088123456789012',GITHUB_TOKEN:'fixture-github',GITHUB_REPOSITORY:'fixture/private-data',GITHUB_BRANCH:'main',CHECKOUT_SECRET:'c'.repeat(64),CLIENTS_JSON:JSON.stringify([client]),REGISTRY_STORAGE_MODE:'plain',WECHAT_MCH_ID:'1234567890',WECHAT_APP_ID:'wx0123456789abcdef',WECHAT_CHANNELS:'native'};
+  Object.assign(env,{WECHAT_SERIAL_NO:'A'.repeat(40),WECHAT_PRIVATE_KEY:'fixture-wechat-private',WECHAT_API_V3_KEY:'v'.repeat(32),WECHAT_PUBLIC_KEYS_JSON:'{"PUB_KEY_ID_fixture":"fixture-public"}'});
   const store=new MemoryStore(),alipay:Gateway={query:vi.fn(async()=>null),close:vi.fn(async()=>{}),paymentUrl:vi.fn(()=> 'https://openapi.alipay.com/gateway.do'),verifyNotification:()=>true};
   const wechat:WechatGateway={query:vi.fn(async()=>null),close:vi.fn(async()=>{}),create:vi.fn(async()=>({codeUrl:'weixin://wxpay/bizpayurl?pr=routing-fixture'})),notification:vi.fn(async()=>{throw Error('No verified notification');})};
   const send=vi.fn<typeof fetch>(async()=>new Response('ok')),payments=new Payments(env,store,alipay,Date.now,send,wechat),pending:Promise<unknown>[]=[];

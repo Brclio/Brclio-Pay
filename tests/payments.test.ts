@@ -610,7 +610,7 @@ describe('worker trust boundaries', () => {
       const f=fixture(),id=String((await f.create()).id);
       const original={...(await f.payments.order(id)),expiresAt:new Date(START+30*60_000).toISOString()};
       f.store.data.set(`orders/${id}.json`,original);
-      const paymentUrl=vi.spyOn(f.payments.gateway,'paymentUrl');
+      const paymentUrl=vi.spyOn(f.payments.gateway!,'paymentUrl');
       const request=()=>new Request(`${f.env.PAY_BASE_URL}/api/checkout/${id}/pay`,{
         method:'POST',headers:{Authorization:'Bearer '+checkoutToken(id,f.env),'Content-Type':'application/json'},
         body:JSON.stringify({channel:'page'}),

@@ -1,6 +1,6 @@
 {
   "name": "brclio-pay",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,6 +12,7 @@
     "build": "wrangler deploy --dry-run --outdir dist",
     "predeploy": "node scripts/sync-docs.mjs && node scripts/build-skill.mjs",
     "deploy": "node scripts/deploy-worker.mjs",
+    "setup:deployment": "node scripts/setup-deployment.mjs",
     "build:pages": "node scripts/build-pages.mjs",
     "deploy:pages": "npm run build:pages && node scripts/deploy-pages.mjs",
     "test:runtime": "node scripts/runtime-check.mjs",

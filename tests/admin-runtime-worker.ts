@@ -1,7 +1,8 @@
 // Test-only worker. All authentication secrets are ephemeral harness bindings.
 import { adminLogin, adminLogout, adminSession, requireAdminMutation } from '../src/admin-auth';
 import { HttpError } from '../src/config';
-import type { Env } from '../src/types';
+import { environmentGuide, environmentValue } from '../src/environment';
+import type { Env, Store } from '../src/types';
 
 interface TestBindings {
   ADMIN_EMAIL: string;
@@ -27,6 +28,7 @@ export default {
     const env = {
       ...bindings,
       PAY_BASE_URL: base,
+      CHECKOUT_SECRET: `synthetic-runtime-checkout-${bindings.RUNTIME_TEST_TOKEN}\n`,
       ADMIN_LOGIN_LIMITER: { limit: async ({ key }: { key: string }) => { rateKeys.push(key); return { success: true }; } },
     } as unknown as Env;
     const loginRequest = (origin = base) => new Request(`${base}/api/admin/login`, {
@@ -47,6 +49,24 @@ export default {
     try { requireAdminMutation(mutationRequest(payload.csrfToken), env, identity); } catch { correctCsrf = false; }
     const alteredHash = `${bindings.ADMIN_PASSWORD_HASH.slice(0, -1)}${bindings.ADMIN_PASSWORD_HASH.endsWith('0') ? '1' : '0'}`;
     const logout = adminLogout().headers.get('Set-Cookie') ?? '';
+    let repositoryReads = 0, repositoryWrites = 0;
+    const storage = {
+      readJson: async () => {
+        repositoryReads++;
+        const entry = { name: 'ADMIN_SESSION_SECRET', label: 'Runtime secret fixture', description: 'Synthetic runtime binding', required: true,
+          sensitive: true, example: '<generated>', location: 'Server runtime', changeNotes: 'Synthetic fixture', maintenance: 'Synthetic fixture' };
+        return { schema: 1, title: 'Synthetic runtime guide', updatedAt: '2026-10-22T00:00:00.000Z', intro: [],
+          groups: [{ id: 'runtime', title: 'Runtime', description: 'Synthetic bindings', variables: [entry, { ...entry, name: 'CHECKOUT_SECRET' }] }], notes: [] };
+      },
+      transaction: async () => { repositoryWrites++; throw new Error('Unexpected repository write'); },
+    } as unknown as Store;
+    const secretValue = environmentValue(env, { name: 'ADMIN_SESSION_SECRET' });
+    const initialCheckout = env.CHECKOUT_SECRET;
+    const firstCheckout = environmentValue(env, { name: 'CHECKOUT_SECRET' });
+    env.CHECKOUT_SECRET = `${initialCheckout}rotated\n`;
+    const changedCheckout = environmentValue(env, { name: 'CHECKOUT_SECRET' });
+    const revealWithoutStorage = repositoryReads === 0 && repositoryWrites === 0;
+    const guideText = JSON.stringify(await environmentGuide(env, storage));
     return Response.json({
       passwordLogin: response.status === 200 && payload.user.email === bindings.ADMIN_EMAIL,
       secureCookie: header.startsWith('__Host-brclio_admin=') && /; HttpOnly(?:;|$)/.test(header)
@@ -65,6 +85,14 @@ export default {
       foreignMutationRejected: await rejectsWith(() => requireAdminMutation(mutationRequest(payload.csrfToken, 'https://foreign.example'), env, identity), 403),
       correctCsrf,
       passwordChangeInvalidatesSession: await rejectsWith(() => adminSession(sessionRequest, { ...env, ADMIN_PASSWORD_HASH: alteredHash }), 401),
+      runtimeSecretValueRevealed: secretValue.name === 'ADMIN_SESSION_SECRET'
+        && secretValue.configured === true && secretValue.value === bindings.ADMIN_SESSION_SECRET && Number.isFinite(Date.parse(secretValue.retrievedAt)),
+      runtimeValueTracksBinding: firstCheckout.value === initialCheckout && changedCheckout.value === env.CHECKOUT_SECRET,
+      runtimeValueNoStorage: revealWithoutStorage && repositoryWrites === 0,
+      runtimeGuideRemainsRedacted: repositoryReads === 1
+        && !guideText.includes(bindings.ADMIN_SESSION_SECRET) && !guideText.includes(env.CHECKOUT_SECRET),
+      runtimeValueUnknownRejected: await rejectsWith(() => environmentValue(env, { name: 'RUNTIME_TEST_TOKEN' }), 400),
+      runtimeValueBindingRejected: await rejectsWith(() => environmentValue(env, { name: 'ADMIN_LOGIN_LIMITER' }), 400),
       logoutExpiresCookie: /; Max-Age=0(?:;|$)/.test(logout) && /; HttpOnly(?:;|$)/.test(logout)
         && /; Secure(?:;|$)/.test(logout) && /; SameSite=Strict(?:;|$)/.test(logout),
     });

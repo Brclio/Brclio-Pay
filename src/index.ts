@@ -1,9 +1,9 @@
 import {GitHubStore,GitHubError} from './store';
 import {createAlipay} from './alipay';
 import {authenticate,authenticateCheckout,authenticateHeaders,checkoutToken} from './auth';
-import {clients,configurationReady,HttpError,requireReady,requireThat} from './config';
+import {clients,HttpError,paymentChannels,providerConfigured,requireInfrastructureReady,requireReady,requireThat} from './config';
 import {Payments} from './payments';
-import type {Env,ProductClient} from './types';
+import type {Env,PaymentProvider,ProductClient} from './types';
 import {handleAdmin} from './admin';
 import {handleIntegration} from './integration';
 import {Registry} from './registry';
@@ -11,7 +11,8 @@ import {hmacSha256,sha256,safeEqualHex} from './crypto';
 import {GitHubApp} from './github-app';
 import {PartitionedStore} from './partitioned-store';
 import {createWechat} from './wechat';
-import {skillMarkdown,skillZip,type SkillVariant} from './skill';
+import {paymentAdapters} from './providers';
+import {deploymentSkillMarkdown,deploymentSkillZip,skillMarkdown,skillZip,type SkillVariant} from './skill';
 import {handleLegacyWechat} from './legacy-wechat';
 
 function json(value:unknown,status=200):Response {return Response.json(value,{status});}
@@ -52,7 +53,8 @@ async function runtimeEnv(env:Env,store?:import('./types').Store):Promise<Env> {
 let healthCache:{key:string;until:number;value:Record<string,unknown>}|undefined;
 export function service(env:Env):Payments {
   if(cached?.env===env)return cached.payments;
-  const payments=new Payments(env,storeFor(env),createAlipay(env),Date.now,undefined,env.WECHAT_CHANNELS?.split(',').includes('native')?createWechat(env):undefined);
+  const adapters=paymentAdapters(env);
+  const payments=new Payments(env,storeFor(env),adapters.alipay,Date.now,undefined,adapters.wechat);
   cached={env,payments};return payments;
 }
 
@@ -76,22 +78,32 @@ export async function handle(request:Request,env:Env,ctx:ExecutionContext,provid
         requireThat(/^[a-z0-9][a-z0-9_-]{1,63}$/.test(request.headers.get('X-Brclio-Client')||'')&&/^\d{10}$/.test(timestamp)&&Math.abs(Date.now()/1000-Number(timestamp))<=300&&/^[A-Za-z0-9_-]{16,128}$/.test(request.headers.get('X-Brclio-Nonce')||'')&&/^[a-f0-9]{64}$/.test(request.headers.get('X-Brclio-Signature')||''),401,'UNAUTHORIZED','请求签名无效或已过期');
       }
       if(env.PAYMENT_API_LIMITER){const limit=await env.PAYMENT_API_LIMITER.limit({key:hmacSha256(env.CHECKOUT_SECRET,'payment-ip:'+(request.headers.get('CF-Connecting-IP')||'unknown'))});requireThat(limit.success,429,'PAYMENT_RATE_LIMIT','请求过于频繁，请稍后重试');}
-      const effective=await runtimeEnv(env,provided?.store);requireReady(effective,false);
+      const effective=await runtimeEnv(env,provided?.store);requireInfrastructureReady(effective);
       const payments=provided||service(effective);
       return secure(await handleLegacyWechat(request,effective,payments,ctx));
     }
     if(url.hostname===legacyHost&&['/admin','/admin/','/admin.html'].includes(path))return secure(Response.redirect(env.PAY_BASE_URL+'/admin',302));
+    if(['/api/skills/brclio-pay-deploy.zip','/api/skills/brclio-pay-deploy/SKILL.md'].includes(path) && ['GET','HEAD'].includes(request.method)){
+      const archive=path.endsWith('.zip');
+      return secure(new Response(request.method==='HEAD'?null:archive?deploymentSkillZip() as BodyInit:deploymentSkillMarkdown(),{headers:{'Content-Type':archive?'application/zip':'text/markdown;charset=utf-8',...(archive?{'Content-Disposition':'attachment; filename="brclio-pay-deploy.zip"'}:{})}}));
+    }
     const skillMatch=/^\/api\/skills\/(brclio-pay-integrate|brclio-alipay-integrate|brclio-wechatpay-integrate)(\.zip|\/SKILL\.md)$/.exec(path);
     if(skillMatch && ['GET','HEAD'].includes(request.method)){
       const variant=skillMatch[1] as SkillVariant;
       return secure(new Response(request.method==='HEAD'?null:skillMatch[2]==='.zip'?skillZip(variant) as BodyInit:skillMarkdown(variant),{headers:{'Content-Type':skillMatch[2]==='.zip'?'application/zip':'text/markdown;charset=utf-8',...(skillMatch[2]==='.zip'?{'Content-Disposition':`attachment; filename="${variant}.zip"`}:{})}}));
     }
     if (request.method==='GET' && path==='/api/health') {
-      const key=hmacSha256(env.CHECKOUT_SECRET || 'unconfigured',JSON.stringify([env.GITHUB_REPOSITORY,env.PAYMENT_ENABLED,env.CLIENTS_JSON,env.REGISTRY_ENCRYPTION_KEY]));
-      if(healthCache?.key===key && healthCache.until>Date.now())return secure(json(healthCache.value));
-      let ready=false;try{const effective=await runtimeEnv(env,provided?.store);ready=configurationReady(effective);if(ready&&effective.WECHAT_CHANNELS?.split(',').includes('native'))createWechat(effective);}catch{ready=false;/* report availability only */}
-      const value={service:'Brclio Pay',version:'1.2.1',ready,acceptingPayments:ready && env.PAYMENT_ENABLED==='true',mode:env.PAYMENT_MODE || 'live',providers:{alipay:{configured:!!(env.ALIPAY_PRIVATE_KEY&&env.ALIPAY_PUBLIC_KEY),channels:env.ALIPAY_CHANNELS?.split(',')||[]},wechat:{configured:!!(env.WECHAT_PRIVATE_KEY&&env.WECHAT_API_V3_KEY&&env.WECHAT_PUBLIC_KEYS_JSON),channels:env.WECHAT_CHANNELS?.split(',')||[]}},storage:'github-private-plaintext'};
-      healthCache={key,until:Date.now()+15000,value};return secure(json(value));
+      const key=hmacSha256(env.CHECKOUT_SECRET || 'unconfigured',JSON.stringify([env.PAY_BASE_URL,env.PAYMENT_MODE,env.GITHUB_TOKEN,env.GITHUB_APP_ID,env.GITHUB_APP_PRIVATE_KEY,env.GITHUB_APP_INSTALLATION_ID,env.GITHUB_REPOSITORY,env.GITHUB_BRANCH,env.PAYMENT_ENABLED,env.CLIENTS_JSON,env.REGISTRY_ENCRYPTION_KEY,env.REGISTRY_STORAGE_MODE,env.ALIPAY_CHANNELS,env.ALIPAY_APP_ID,env.ALIPAY_SELLER_ID,env.ALIPAY_PRIVATE_KEY,env.ALIPAY_PUBLIC_KEY,env.ALIPAY_GATEWAY,env.WECHAT_CHANNELS,env.WECHAT_MCH_ID,env.WECHAT_APP_ID,env.WECHAT_SERIAL_NO,env.WECHAT_PRIVATE_KEY,env.WECHAT_API_V3_KEY,env.WECHAT_PUBLIC_KEYS_JSON,env.WECHAT_PUBLIC_KEY_ID]));
+      if(!provided&&healthCache?.key===key && healthCache.until>Date.now())return secure(json(healthCache.value));
+      const providerHealth=(provider:PaymentProvider)=>{
+        const channels=paymentChannels(env,provider),selected=channels.length>0;let configured=false;
+        try{if(providerConfigured(env,provider)){if(provider==='alipay')createAlipay(env);else createWechat(env);configured=true;}}catch{/* report availability only */}
+        return {selected,configured,channels:configured?channels:[]};
+      };
+      const providers={alipay:providerHealth('alipay'),wechat:providerHealth('wechat')};
+      let ready=false;try{const effective=await runtimeEnv(env,provided?.store);requireReady(effective,false);ready=Object.values(providers).every(provider=>!provider.selected||provider.configured);}catch{/* report availability only */}
+      const value={service:'Brclio Pay',version:'1.3.0',ready,acceptingPayments:ready && env.PAYMENT_ENABLED==='true',mode:env.PAYMENT_MODE || 'live',providers,storage:'github-private-plaintext'};
+      if(!provided)healthCache={key,until:Date.now()+15000,value};return secure(json(value));
     }
     if(path.startsWith('/api/admin/'))return secure(await handleAdmin(request,env,provided?.store || storeFor(env),{
       service:async()=>{
@@ -142,13 +154,16 @@ export async function handle(request:Request,env:Env,ctx:ExecutionContext,provid
       requireThat(limit.success,429,'PAYMENT_RATE_LIMIT','请求过于频繁，请稍后重试');
     }
     env=await runtimeEnv(env,provided?.store);
-    requireReady(env,false);
+    requireInfrastructureReady(env);
     const payments=provided || service(env);
     if(path==='/api/v1/catalog') {
+      if((['alipay','wechat'] as const).some(provider=>paymentChannels(env,provider).length))requireReady(env,false);
       const raw=await readBody(request);requireThat(raw==='',400,'INVALID_REQUEST','目录接口不接受请求体');
       const client=authenticate(request,raw,env);
       const skus=Object.fromEntries(Object.entries(client.skus).sort(([a],[b])=>a.localeCompare(b)).map(([sku,item])=>[sku,{...item,enabled:item.enabled!==false}]));
-      return secure(json({clientId:client.id,name:client.name,enabled:client.enabled!==false,acceptingPayments:env.PAYMENT_ENABLED==='true' && client.enabled!==false,mode:env.PAYMENT_MODE,currency:'CNY',version:sha256(JSON.stringify(skus)),providers:client.providers||['alipay'],channels:{alipay:env.ALIPAY_CHANNELS.split(','),wechat:env.WECHAT_CHANNELS?.split(',')||[]},skus}));
+      const providers=(client.providers||['alipay']).filter(provider=>paymentChannels(env,provider).length>0);
+      const channels={alipay:providers.includes('alipay')?paymentChannels(env,'alipay'):[],wechat:providers.includes('wechat')?paymentChannels(env,'wechat'):[]};
+      return secure(json({clientId:client.id,name:client.name,enabled:client.enabled!==false,acceptingPayments:env.PAYMENT_ENABLED==='true' && client.enabled!==false&&providers.length>0,mode:env.PAYMENT_MODE,currency:'CNY',version:sha256(JSON.stringify(skus)),providers,channels,skus}));
     }
     if(path==='/api/wechat/notify'){
       const order=await payments.wechatNotification(request.headers,await readBody(request,65536));
@@ -211,6 +226,6 @@ export async function handle(request:Request,env:Env,ctx:ExecutionContext,provid
 export default {
   fetch:handle,
   async scheduled(_event:ScheduledController,env:Env,ctx:ExecutionContext) {
-    ctx.waitUntil((async()=>{try {const effective=await runtimeEnv(env);requireReady(effective,false);await service(effective).maintenance(clients(effective));}catch{console.warn('maintenance_not_ready');}})());
+    ctx.waitUntil((async()=>{try {const effective=await runtimeEnv(env);requireInfrastructureReady(effective);await service(effective).maintenance(clients(effective));}catch{console.warn('maintenance_not_ready');}})());
   }
 };

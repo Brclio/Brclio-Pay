@@ -1,4 +1,5 @@
 // Read-only release checks. No credentials, login, orders, or mutations are used.
+// The anonymous environment-value POST only tests that its read is denied.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -13,6 +14,12 @@ const MAX_ATTEMPTS = 3;
 const MAX_BODY_BYTES = 512 * 1024;
 const hash = value => createHash('sha256').update(value).digest('hex');
 const publicAssetNames = ['styles.css', 'admin.css', 'admin.js', 'checkout.js', 'landing.js'];
+const skillNames = ['brclio-pay-integrate', 'brclio-alipay-integrate', 'brclio-wechatpay-integrate', 'brclio-pay-deploy'];
+const deploymentDocNames = ['deployment', 'environment-variables', 'merchant-setup'];
+const publicDownloadRoutes = new Set([
+  ...skillNames.flatMap(name => [`/api/skills/${name}.zip`, `/api/skills/${name}/SKILL.md`]),
+  ...deploymentDocNames.map(name => `/docs/${name}.md`),
+]);
 const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
 function secureAsset(response) {
@@ -30,12 +37,64 @@ function httpsOrigin(value) {
   return url.origin;
 }
 
+// Read only the generated JSON object initializers, never execute the source file.
+function bundledSkillFiles(root) {
+  const source = ts.createSourceFile('skill-data.ts', readFileSync(path.join(root, 'src/skill-data.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
+  const bundles = {};
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const name = declaration.name.getText(source);
+      if (!['skillVariants', 'deploymentSkillFiles'].includes(name)) continue;
+      if (!declaration.initializer || !ts.isObjectLiteralExpression(declaration.initializer)) throw new Error('Invalid public Skill bundle');
+      bundles[name] = JSON.parse(declaration.initializer.getText(source));
+    }
+  }
+  return Object.fromEntries(skillNames.map(name => {
+    const files = name === 'brclio-pay-deploy' ? bundles.deploymentSkillFiles : bundles.skillVariants?.[name];
+    if (!files || typeof files !== 'object' || Array.isArray(files) || !Object.keys(files).length
+      || typeof files[`${name}/SKILL.md`] !== 'string'
+      || Object.entries(files).some(([entry, value]) => !entry.startsWith(`${name}/`) || !/^[A-Za-z0-9_./-]+$/.test(entry)
+        || entry.split('/').some(part => part === '..' || !part) || typeof value !== 'string')) throw new Error('Invalid public Skill bundle');
+    return [name, files];
+  }));
+}
+
+// Match the runtime's deterministic stored UTF-8 ZIP without importing runtime TS.
+function bundledZip(files) {
+  const local = [], central = [];
+  let offset = 0;
+  for (const [name, value] of Object.entries(files).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+    const filename = Buffer.from(name), data = Buffer.from(value);
+    let crc = 0xffffffff;
+    for (const byte of data) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+    crc = (crc ^ 0xffffffff) >>> 0;
+    const record = Buffer.alloc(30 + filename.length), directory = Buffer.alloc(46 + filename.length);
+    record.writeUInt32LE(0x04034b50, 0); record.writeUInt16LE(20, 4); record.writeUInt16LE(0x0800, 6);
+    record.writeUInt16LE(0x0021, 12); record.writeUInt32LE(crc, 14); record.writeUInt32LE(data.length, 18);
+    record.writeUInt32LE(data.length, 22); record.writeUInt16LE(filename.length, 26); filename.copy(record, 30);
+    directory.writeUInt32LE(0x02014b50, 0); directory.writeUInt16LE(20, 4); directory.writeUInt16LE(20, 6);
+    directory.writeUInt16LE(0x0800, 8); directory.writeUInt16LE(0x0021, 14); directory.writeUInt32LE(crc, 16);
+    directory.writeUInt32LE(data.length, 20); directory.writeUInt32LE(data.length, 24); directory.writeUInt16LE(filename.length, 28);
+    directory.writeUInt32LE(offset, 42); filename.copy(directory, 46);
+    local.push(record, data); central.push(directory); offset += record.length + data.length;
+  }
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length, 8); end.writeUInt16LE(central.length, 10);
+  end.writeUInt32LE(central.reduce((sum, item) => sum + item.length, 0), 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, ...central, end]);
+}
+
 export function loadDeploymentExpectations(root = ROOT) {
   const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
   const parsed = ts.parseConfigFileTextToJson('wrangler.jsonc', readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8'));
   const vars = parsed.config?.vars;
   if (parsed.error || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)
     || !['live', 'sandbox'].includes(vars?.PAYMENT_MODE) || !['true', 'false'].includes(vars?.PAYMENT_ENABLED)) throw new Error('Invalid deployment configuration');
+  const bundles = bundledSkillFiles(root);
   return {
     version: manifest.version,
     paymentMode: vars.PAYMENT_MODE,
@@ -48,6 +107,15 @@ export function loadDeploymentExpectations(root = ROOT) {
     publicAssets: Object.fromEntries(publicAssetNames.map(name => ['/' + name, {
       hash: hash(readFileSync(path.join(root, 'public', name))), type: name.endsWith('.css') ? 'css' : 'js',
     }])),
+    publicDownloads: Object.fromEntries([
+      ...Object.entries(bundles).flatMap(([name, files]) => [
+        [`/api/skills/${name}.zip`, { hash: hash(bundledZip(files)), type: 'zip', filename: `${name}.zip` }],
+        [`/api/skills/${name}/SKILL.md`, { hash: hash(files[`${name}/SKILL.md`]), type: 'markdown' }],
+      ]),
+      ...deploymentDocNames.map(name => [`/docs/${name}.md`, {
+        hash: hash(readFileSync(path.join(root, 'public/docs', `${name}.md`))), type: 'markdown',
+      }]),
+    ]),
   };
 }
 
@@ -72,14 +140,16 @@ async function boundedBytes(response) {
   } finally { reader.releaseLock(); }
 }
 
-async function probe(baseUrl, route, validate, { fetcher, dispatcher, sleep, attempts }) {
+async function probe(baseUrl, route, validate, { fetcher, dispatcher, sleep, attempts }, request = {}) {
   let last = { passed: false };
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt) await sleep(attempt * 2000);
     try {
       const response = await fetcher(new URL(route, baseUrl), {
-        method: 'GET', redirect: 'manual', dispatcher, signal: AbortSignal.timeout(30_000),
-        headers: { Accept: 'application/json, text/html, application/javascript', 'Cache-Control': 'no-cache' },
+        method: request.method || 'GET', ...(request.body ? { body: request.body } : {}),
+        redirect: 'manual', dispatcher, signal: AbortSignal.timeout(30_000),
+        headers: { Accept: 'application/json, text/html, application/javascript, text/markdown, application/zip',
+          'Cache-Control': 'no-cache', ...(request.body ? { 'Content-Type': 'application/json' } : {}) },
       });
       // Keep diagnostic values to booleans and valid HTTP status codes only.
       last = { passed: false, ...(Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? { status: response.status } : {}) };
@@ -102,6 +172,11 @@ export async function runDeploymentPreflight({ expected, fetcher = fetch, dispat
     || Object.entries(expected.publicAssets).some(([route, asset]) => !publicAssetNames.includes(route.slice(1))
       || route !== '/' + route.slice(1) || !asset || !/^[a-f0-9]{64}$/.test(asset.hash)
       || asset.type !== (route.endsWith('.css') ? 'css' : 'js')))) throw new Error('Invalid public asset verification');
+  if (expected.publicDownloads !== undefined && (!expected.publicDownloads || typeof expected.publicDownloads !== 'object'
+    || Array.isArray(expected.publicDownloads) || Object.keys(expected.publicDownloads).length !== publicDownloadRoutes.size
+    || Object.entries(expected.publicDownloads).some(([route, asset]) => !publicDownloadRoutes.has(route) || !asset
+      || !/^[a-f0-9]{64}$/.test(asset.hash) || asset.type !== (route.endsWith('.zip') ? 'zip' : 'markdown')
+      || (asset.type === 'zip' ? asset.filename !== route.split('/').at(-1) : asset.filename !== undefined)))) throw new Error('Invalid public download verification');
   const targets = { worker: httpsOrigin(expected.workerUrl), domain: httpsOrigin(expected.publicUrl) };
   const month = new Date(now + 8 * 3600000).toISOString().slice(0, 7);
   const options = { fetcher, dispatcher, sleep, attempts };
@@ -126,6 +201,8 @@ export async function runDeploymentPreflight({ expected, fetcher = fetch, dispat
     anonymousSummary: [`/api/admin/reports/summary?month=${month}`, validStatus(401)],
     anonymousOrders: ['/api/admin/reports/orders?limit=1', validStatus(401)],
     anonymousSkill: ['/api/admin/skill.zip', validStatus(401)],
+    anonymousEnvironment: ['/api/admin/environment', validStatus(401)],
+    anonymousEnvironmentValue: ['/api/admin/environment/value', validStatus(401), { method: 'POST', body: '{"name":"PAY_BASE_URL"}' }],
     staticSkill: ['/skills/brclio-pay-integrate.zip', validStatus(404)],
   };
   if (expected.publicAssets) {
@@ -141,9 +218,16 @@ export async function runDeploymentPreflight({ expected, fetcher = fetch, dispat
       })];
     }
   }
+  for (const [route, asset] of Object.entries(expected.publicDownloads || {})) {
+    endpoints['publicDownload:' + route] = [route, (response, bytes) => ({
+      passed: response.status === 200 && hash(bytes) === asset.hash && secureAsset(response)
+        && (asset.type === 'zip' ? /^application\/zip(?:;|$)/i : /^text\/markdown(?:;|$)/i).test(response.headers.get('content-type') || '')
+        && (asset.type !== 'zip' || response.headers.get('content-disposition') === `attachment; filename="${asset.filename}"`),
+    })];
+  }
   const results = await Promise.all(Object.entries(targets).map(async ([label, base]) => [label,
-    Object.fromEntries(await Promise.all(Object.entries(endpoints).map(async ([name, [route, validate]]) => [name,
-      await probe(base, route, validate, options)])))]));
+    Object.fromEntries(await Promise.all(Object.entries(endpoints).map(async ([name, [route, validate, request]]) => [name,
+      await probe(base, route, validate, options, request)])))]));
   const checks = Object.fromEntries(results);
   const deploymentPreflight = results.every(([, value]) => Object.values(value).every(check => check.passed));
   return { deploymentPreflight, configurationValid: true, ...checks };

@@ -17,9 +17,19 @@ export function deploymentConfig(config,base=root) {
     vars:{},keep_vars:true};
 }
 
+export function deploymentArguments(argv) {
+  let config='wrangler.jsonc',dryRun=false,hasConfig=false;
+  for(let index=0;index<argv.length;index++){
+    if(argv[index]==='--dry-run'&&!dryRun)dryRun=true;
+    else if(argv[index]==='--config'&&!hasConfig&&argv[index+1]&&!argv[index+1].startsWith('--')){config=argv[++index];hasConfig=true;}
+    else throw Error('Use --dry-run or --config PATH; runtime values stay in the Cloudflare dashboard');
+  }
+  return {config,dryRun};
+}
+
 async function main() {
-  if(process.argv.slice(2).some(arg=>arg!=='--dry-run'))throw Error('Only --dry-run is accepted; maintain runtime values in the Cloudflare dashboard');
-  const parsed=ts.parseConfigFileTextToJson('wrangler.jsonc',await readFile(resolve(root,'wrangler.jsonc'),'utf8'));
+  const options=deploymentArguments(process.argv.slice(2));
+  const parsed=ts.parseConfigFileTextToJson(options.config,await readFile(resolve(root,options.config),'utf8'));
   if(parsed.error)throw Error('Invalid Worker deployment configuration');
   const config=deploymentConfig(parsed.config);
   const temporary=await mkdtemp(resolve(tmpdir(),'brclio-pay-deploy-'));
@@ -27,13 +37,13 @@ async function main() {
   try {
     await writeFile(path,JSON.stringify(config),{mode:0o600});
     const result=spawnSync(process.execPath,[resolve(root,'node_modules/wrangler/bin/wrangler.js'),'deploy','--config',path,
-      ...process.argv.slice(2)],{cwd:root,env:{...process.env,CLOUDFLARE_ACCOUNT_ID:config.account_id,CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV:'false'},encoding:'utf8',maxBuffer:8*1024*1024});
+      ...(options.dryRun?['--dry-run']:[])],{cwd:root,env:{...process.env,CLOUDFLARE_ACCOUNT_ID:config.account_id,CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV:'false'},encoding:'utf8',maxBuffer:8*1024*1024});
     const output=(result.stdout||'')+'\n'+(result.stderr||'');
     await mkdir(resolve(root,'secrets'),{recursive:true,mode:0o700});
     await writeFile(resolve(root,'secrets/deploy-worker.log'),output,{mode:0o600});
     const version=/Current Version ID:\s*([a-f0-9-]{36})/.exec(output)?.[1];
     console.log(JSON.stringify({worker:config.name,exitCode:result.status,version,dashboardVariablesPreserved:true,
-      runtimeValuesInDeployment:0,dryRun:process.argv.includes('--dry-run')}));
+      runtimeValuesInDeployment:0,dryRun:options.dryRun}));
     if(result.error || result.status!==0){console.error('Worker deployment failed; diagnostic output is saved locally in secrets/deploy-worker.log');process.exitCode=1;}
   } finally {await rm(temporary,{recursive:true,force:true});}
 }

@@ -15,6 +15,7 @@ class MemoryStore implements Store {
 }
 function fixture(){
   const env={ASSETS:{} as Fetcher,PAY_BASE_URL:'https://pay.bornforthis.cn',PAYMENT_MODE:'live',PAYMENT_ENABLED:'true',ALIPAY_CHANNELS:'page,wap',ALIPAY_APP_ID:'2021007109602288',ALIPAY_PRIVATE_KEY:'fixture-private',ALIPAY_PUBLIC_KEY:'fixture-public',ALIPAY_SELLER_ID:'2088123456789012',GITHUB_TOKEN:'fixture-token',GITHUB_REPOSITORY:'fixture/private-data',GITHUB_BRANCH:'main',CHECKOUT_SECRET:'c'.repeat(64),LEGACY_WECHAT_CHECKOUT_SECRET:'l'.repeat(64),CLIENTS_JSON:JSON.stringify([client]),REGISTRY_STORAGE_MODE:'plain',WECHAT_MCH_ID:'1234567890',WECHAT_APP_ID:'wx0123456789abcdef',WECHAT_CHANNELS:'native'} as Env&{LEGACY_WECHAT_CHECKOUT_SECRET:string};
+  Object.assign(env,{WECHAT_SERIAL_NO:'A'.repeat(40),WECHAT_PRIVATE_KEY:'fixture-wechat-private',WECHAT_API_V3_KEY:'v'.repeat(32),WECHAT_PUBLIC_KEYS_JSON:'{"PUB_KEY_ID_fixture":"fixture-public"}'});
   const store=new MemoryStore(),alipay:Gateway={query:vi.fn(async()=>null),close:vi.fn(async()=>{}),paymentUrl:()=> 'https://openapi.alipay.com/gateway.do',verifyNotification:()=>false},wechat:WechatGateway={query:vi.fn(async()=>null),close:vi.fn(async()=>{}),create:vi.fn(async()=>({codeUrl:'weixin://wxpay/bizpayurl?pr=legacy-fixture'})),notification:vi.fn(async()=>{throw Error('No provider fixture');})},send=vi.fn<typeof fetch>(async()=>new Response('ok'));
   const payments=new Payments(env,store,alipay,Date.now,send,wechat),pending:Promise<unknown>[]=[],ctx={waitUntil:(task:Promise<unknown>)=>pending.push(task)} as unknown as ExecutionContext;
   const fetcher=vi.fn<typeof fetch>((input,init)=>handleLegacyWechat(new Request(input,init),env,payments,ctx));
@@ -46,12 +47,12 @@ describe('unchanged XHS WeChat SDK compatibility',()=>{
     f.env.CLIENTS_JSON=JSON.stringify([{...client,legacyWechat:undefined,providers:['alipay','wechat']}]);
     expect((await f.call('/api/v1/orders','POST',JSON.stringify(f.input))).status).toBe(401);expect(f.wechat.create).not.toHaveBeenCalled();
   });
-  it.each(['global','client'])('blocks new prepay while %s collection is disabled and keeps existing history readable',async kind=>{
+  it.each(['global','client','channels'])('blocks new prepay while %s collection is disabled and keeps existing history readable',async kind=>{
     const f=fixture(),created=await f.sdk.createOrder(f.input);
-    if(kind==='global')f.env.PAYMENT_ENABLED='false';else f.env.CLIENTS_JSON=JSON.stringify([{...client,enabled:false}]);
+    if(kind==='global')f.env.PAYMENT_ENABLED='false';else if(kind==='channels'){f.env.ALIPAY_CHANNELS='';f.env.WECHAT_CHANNELS='';}else f.env.CLIENTS_JSON=JSON.stringify([{...client,enabled:false}]);
     expect(await f.sdk.getOrder(created.id)).toMatchObject({id:created.id,status:'PENDING'});
     expect(await f.sdk.createOrder(f.input)).toMatchObject({id:created.id,amount:{total:300,currency:'CNY'}});expect(f.wechat.create).toHaveBeenCalledTimes(1);
-    const response=await f.call('/api/v1/orders','POST',JSON.stringify({...f.input,merchantOrderId:'new-disabled-order'}));expect(response.status).toBe(kind==='global'?503:403);expect(f.wechat.create).toHaveBeenCalledTimes(1);
+    const response=await f.call('/api/v1/orders','POST',JSON.stringify({...f.input,merchantOrderId:'new-disabled-order'}));expect(response.status).toBe(kind==='client'?403:503);expect(f.wechat.create).toHaveBeenCalledTimes(1);
   });
   it('retains checkout token authentication for the old 32-character order and protects query/refresh',async()=>{
     const f=fixture(),created=await f.sdk.createOrder(f.input),path=`/api/checkout/${created.id}`,authorization='Bearer '+hmacSha256(f.env.LEGACY_WECHAT_CHECKOUT_SECRET,`checkout:v1:${created.id}`);

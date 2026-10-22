@@ -91,7 +91,7 @@ describe('administrator order management routes',()=>{
     const closed=await mutate('close',(await f.detail()).version),reopened=await mutate('reopen',closed.version),providerId=reopened.order.activeAttempt.id;
     expect(providerId).not.toBe(f.id);
     const capability=new URLSearchParams(new URL(reopened.checkoutUrl).hash.slice(1)).get('token');
-    const buildUrl=vi.spyOn(f.payments.gateway,'paymentUrl');
+    const buildUrl=vi.spyOn(f.payments.gateway!,'paymentUrl');
     const pay=await handle(new Request(BASE+`/api/checkout/${f.id}/pay`,{method:'POST',headers:{Authorization:'Bearer '+capability,'Content-Type':'application/json'},body:JSON.stringify({channel:'page'})}),env,context,f.payments);
     expect(pay.status).toBe(200);expect(buildUrl).toHaveBeenCalledWith(expect.objectContaining({id:providerId,totalAmount:'9.90'}),expect.objectContaining({pageReturnUrl:BASE+`/payment/return?payment_order_id=${f.id}`}));
     const commits=f.store.commits.length;

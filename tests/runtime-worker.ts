@@ -3,6 +3,9 @@ import { createAlipay, type AlipayEnvironment } from '../src/alipay';
 import { hmacSha256, randomId, randomNonce, safeEqualHex, sha256 } from '../src/crypto';
 import { createPublicKey, createVerify } from 'node:crypto';
 import { AlipaySdk } from 'alipay-sdk';
+import {requireReady} from '../src/config';
+import {service} from '../src/index';
+import type {Env} from '../src/types';
 
 interface RuntimeEnv extends AlipayEnvironment {
   RUNTIME_TOKEN: string;
@@ -75,6 +78,16 @@ export default {
     }
     phase = 'crypto';
     const nonce = randomNonce();
+    phase = 'provider-modes';
+    const base={...env,ASSETS:{} as Fetcher,PAY_BASE_URL:'https://runtime.test',PAYMENT_MODE:'live',PAYMENT_ENABLED:'false',GITHUB_TOKEN:'runtime-fixture-token',GITHUB_REPOSITORY:'fixture/private-data',GITHUB_BRANCH:'main',CHECKOUT_SECRET:'c'.repeat(64),CLIENTS_JSON:'[]',REGISTRY_STORAGE_MODE:'plain',ALIPAY_CHANNELS:'page,wap',WECHAT_CHANNELS:''} as Env;
+    const wechatBindings={WECHAT_CHANNELS:'native',WECHAT_MCH_ID:'1234567890',WECHAT_APP_ID:'wx0123456789abcdef',WECHAT_SERIAL_NO:'A'.repeat(40),WECHAT_PRIVATE_KEY:env.ALIPAY_PRIVATE_KEY,WECHAT_API_V3_KEY:'v'.repeat(32),WECHAT_PUBLIC_KEYS_JSON:JSON.stringify({PUB_KEY_ID_runtime_fixture:env.ALIPAY_PUBLIC_KEY})};
+    requireReady(base);
+    const alipayOnly=service(base);
+    const wechatEnv={...base,...wechatBindings,ALIPAY_CHANNELS:'',ALIPAY_APP_ID:'',ALIPAY_SELLER_ID:'',ALIPAY_PRIVATE_KEY:'',ALIPAY_PUBLIC_KEY:''};
+    requireReady(wechatEnv);
+    const wechatOnly=service(wechatEnv);
+    const dualEnv={...base,...wechatBindings};requireReady(dualEnv);
+    const dual=service(dualEnv);
     return Response.json({
       checks: {
         rsa: new URL(paymentUrl).searchParams.get('sign_type') === 'RSA2',
@@ -88,6 +101,9 @@ export default {
         nativeFetchCloseVerified: true,
         invalidCloseRejected,
         invalidRejected,
+        alipayOnlyDeployment:!!alipayOnly.gateway&&!alipayOnly.wechatGateway,
+        wechatOnlyDeployment:!wechatOnly.gateway&&!!wechatOnly.wechatGateway,
+        dualProviderDeployment:!!dual.gateway&&!!dual.wechatGateway,
         ...diagnostics,
       },
       // Returned only to the local harness for Node-side signature verification.

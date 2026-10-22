@@ -17,6 +17,7 @@ const knownVariables = new Set([
   'GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY', 'GITHUB_APP_INSTALLATION_ID', 'GITHUB_REPOSITORY', 'GITHUB_BRANCH', 'REGISTRY_STORAGE_MODE', 'CLIENTS_JSON',
   'ADMIN_EMAIL', 'ADMIN_PASSWORD_HASH', 'ADMIN_PASSWORD_PEPPER', 'ADMIN_SESSION_SECRET',
   'LEGACY_WECHAT_BASE_URL', 'LEGACY_WECHAT_CHECKOUT_SECRET',
+  'GITHUB_TOKEN', 'REGISTRY_ENCRYPTION_KEY',
   'ASSETS', 'ADMIN_LOGIN_LIMITER', 'INTEGRATION_LIMITER', 'PAYMENT_API_LIMITER',
 ]);
 const fail = code => { throw new Error(code); };
@@ -24,7 +25,7 @@ const plain = value => value !== null && typeof value === 'object' && !Array.isA
 const textList = value => Array.isArray(value) && value.length > 0 && value.length <= 30 && value.every(item => typeof item === 'string' && item.length > 0 && item.length <= 3000);
 const digest = value => createHash('sha256').update(canonical(value)).digest('hex');
 
-export function validateEnvironmentGuide(value) {
+export function validateEnvironmentGuide(value, { requireComplete = true } = {}) {
   if (!plain(value) || value.schema !== 1 || typeof value.title !== 'string' || !value.title || value.title.length > 160
     || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))
     || !textList(value.intro) || !textList(value.notes) || !Array.isArray(value.groups) || !value.groups.length || value.groups.length > 20
@@ -41,7 +42,8 @@ export function validateEnvironmentGuide(value) {
       if (!plain(variable) || !knownVariables.has(variable.name) || names.has(variable.name)
         || textFields.some(key => typeof variable[key] !== 'string' || !variable[key] || variable[key].length > 3000)
         || typeof variable.required !== 'boolean' || typeof variable.sensitive !== 'boolean'
-        || Object.keys(variable).some(key => ![...textFields, 'required', 'sensitive'].includes(key))) fail('INVALID_ENVIRONMENT_GUIDE_VARIABLE');
+        || ['generation', 'scope'].some(key => variable[key] !== undefined && (typeof variable[key] !== 'string' || !variable[key] || variable[key].length > 3000))
+        || Object.keys(variable).some(key => ![...textFields, 'required', 'sensitive', 'generation', 'scope'].includes(key))) fail('INVALID_ENVIRONMENT_GUIDE_VARIABLE');
       // PEM bodies and runtime credentials do not belong in explanatory metadata.
       if (/-----BEGIN [A-Z ]+-----\s*[A-Za-z0-9+/]{48}/.test(variable.example)
         || /(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}/.test(variable.example)
@@ -49,7 +51,7 @@ export function validateEnvironmentGuide(value) {
       names.add(variable.name);
     }
   }
-  if (names.size !== knownVariables.size || [...knownVariables].some(name => !names.has(name))) fail('ENVIRONMENT_GUIDE_VARIABLES_INCOMPLETE');
+  if (requireComplete && (names.size !== knownVariables.size || [...knownVariables].some(name => !names.has(name)))) fail('ENVIRONMENT_GUIDE_VARIABLES_INCOMPLETE');
   if (Buffer.byteLength(JSON.stringify(value)) > 128 * 1024) fail('ENVIRONMENT_GUIDE_TOO_LARGE');
   return value;
 }
@@ -62,7 +64,9 @@ export async function synchronizeEnvironmentGuide(github, guide, options = {}) {
   const existing = snapshot.files.find(file => file.path === GUIDE_PATH);
   let current;
   if (existing) {
-    try { current = validateEnvironmentGuide(JSON.parse((await github.bytes(TARGET_REPOSITORY, existing)).toString('utf8'))); }
+    // Earlier schema-1 guides lack newly documented legacy fields. They remain
+    // reviewable without bypassing revision/digest protections on replacement.
+    try { current = validateEnvironmentGuide(JSON.parse((await github.bytes(TARGET_REPOSITORY, existing)).toString('utf8')), { requireComplete: false }); }
     catch { fail('EXISTING_GUIDE_INVALID_REQUIRES_REVIEW'); }
   }
   const identical = !!current && canonical(current) === canonical(guide);

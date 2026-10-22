@@ -14,6 +14,7 @@ function fixture(overrides:Partial<ProductClient>={}){
   let now=START;
   const client:ProductClient={id:'mapped-wechat-product',name:'Legacy product',apiSecret:'a'.repeat(48),webhookSecret:'w'.repeat(48),webhookUrl:'https://product.example/wechat/webhook',returnOrigins:['https://product.example'],skus:{pro:{subject:'专业版',amount:'3.01'}},providers:['wechat'],legacyWechat:{id:EXTERNAL_CLIENT},...overrides};
   const env:Env={ASSETS:{} as Fetcher,PAY_BASE_URL:'https://pay.bornforthis.cn',PAYMENT_MODE:'live',PAYMENT_ENABLED:'true',ALIPAY_CHANNELS:'page',ALIPAY_APP_ID:'2021007109602288',ALIPAY_PRIVATE_KEY:'fixture',ALIPAY_PUBLIC_KEY:'fixture',ALIPAY_SELLER_ID:'2088123456789012',GITHUB_TOKEN:'fixture',GITHUB_REPOSITORY:'owner/private',GITHUB_BRANCH:'main',CHECKOUT_SECRET:'c'.repeat(48),CLIENTS_JSON:JSON.stringify([client]),WECHAT_APP_ID:'wx0123456789abcdef',WECHAT_MCH_ID:'1234567890'};
+  env.WECHAT_CHANNELS='native';
   const alipay:Gateway={query:async()=>null,close:async()=>{},verifyNotification:()=>true,paymentUrl:()=>''};
   const wechat:WechatGateway={query:async()=>null,close:async()=>{},create:async()=>({codeUrl:'weixin://wxpay/bizpayurl?pr=fixture'}),notification:async()=>{throw Error('not used');}};
   const requests:Request[]=[],send=vi.fn(async(input:RequestInfo|URL,init?:RequestInit)=>{requests.push(new Request(input,init));return new Response('ok');}) as typeof fetch;

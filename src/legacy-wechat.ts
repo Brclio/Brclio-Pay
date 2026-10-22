@@ -1,4 +1,4 @@
-import {allowedReturn,clients,HttpError,money,requireReady,requireThat} from './config';
+import {allowedReturn,clients,HttpError,money,paymentChannels,requireInfrastructureReady,requireReady,requireThat} from './config';
 import {hmacSha256,safeEqualHex,sha256} from './crypto';
 import {Payments,providerOf} from './payments';
 import type {Delivery,Env,Order,ProductClient} from './types';
@@ -55,7 +55,7 @@ async function route(request:Request,env:LegacyEnvironment,payments:Payments,ctx
   const api=/^\/api\/v1\/orders(?:\/([a-f0-9]{32})(?:\/(refresh|retry-notification))?)?$/.exec(path);
   requireThat(checkout||api,404,'NOT_FOUND','未找到历史微信接口');
   requireThat(env.PAYMENT_MODE==='live',503,'PAYMENTS_DISABLED','收款尚未启用');
-  requireReady(env,false);
+  requireInfrastructureReady(env);
   if(checkout){
     requireThat(request.method===(checkout[2]?'POST':'GET'),405,'METHOD_NOT_ALLOWED','不支持此请求方式');
     const received=request.headers.get('Authorization')?.replace(/^Bearer /,'')||'';
@@ -100,7 +100,7 @@ async function route(request:Request,env:LegacyEnvironment,payments:Payments,ctx
     // always sees the fulfillment protocol selected by the originating product.
     order=await payments.store.transaction(async tx=>{const current=await tx.read<LegacyOrder>(orderPath(order.id));requireThat(current,503,'ORDER_INTEGRITY','订单记录缺失');checkedOrder(current,client);if(!current.legacyWechat){current.legacyWechat={clientId:client.legacyWechat!.id,quantity:1,channel:'native',centerOrigin:CENTER};tx.put(orderPath(current.id),current);}return current;});
     if(order.status==='PENDING'&&Date.now()>=Date.parse(payments.paymentExpiresAt(order)))order=await payments.refresh(order.id);
-    if(order.status==='PENDING'&&client.enabled!==false&&env.PAYMENT_ENABLED==='true'){
+    if(order.status==='PENDING'&&client.enabled!==false&&env.PAYMENT_ENABLED==='true'&&paymentChannels(env,'wechat').includes('native')){
       const attempt=payments.activeAttempt(order);
       if(attempt.codeUrl||Date.parse(attempt.expiresAt)-Date.now()>=90_000){await payments.pay(order.id,'native');order=await payments.order(order.id);}
     }

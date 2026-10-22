@@ -1,5 +1,5 @@
 import type {Env,Order,PaymentAttempt,ProductClient,Store,Transaction,Delivery,WorkQueue,PaymentProvider} from './types';
-import {allowedReturn,clients,money,requireThat,requireReady} from './config';
+import {allowedReturn,clients,money,paymentChannels,requireThat,requireReady} from './config';
 import {sha256,hmacSha256,randomId} from './crypto';
 import {checkoutToken} from './auth';
 import {indexOrder} from './reporting';
@@ -39,9 +39,17 @@ function confirmedPaidAt(value:unknown,now:number):string {
   return new Date(time).toISOString();
 }
 export class Payments {
-  constructor(public env:Env,public store:Store,public gateway:Gateway,public now:()=>number=Date.now,public send:typeof fetch=(input,init)=>globalThis.fetch(input,init),public wechatGateway?:WechatGateway) {}
+  constructor(public env:Env,public store:Store,public gateway:Gateway|undefined,public now:()=>number=Date.now,public send:typeof fetch=(input,init)=>globalThis.fetch(input,init),public wechatGateway?:WechatGateway) {}
+  private alipayGateway():Gateway {
+    requireThat(this.gateway,503,'ALIPAY_NOT_READY','支付宝尚未完成配置');return this.gateway;
+  }
+  private requireProviderEnabled(provider:PaymentProvider):void {
+    requireThat(paymentChannels(this.env,provider).length>0,503,'PROVIDER_DISABLED','该支付方式尚未启用');
+    if(provider==='alipay')this.alipayGateway();
+    else requireThat(this.env.PAYMENT_MODE==='live'&&this.wechatGateway,503,'WECHAT_NOT_READY','微信支付尚未完成配置');
+  }
   private gatewayFor(order:Order):Pick<Gateway,'query'|'close'> {
-    if(providerOf(order)==='alipay')return this.gateway;
+    if(providerOf(order)==='alipay')return this.alipayGateway();
     requireThat(this.wechatGateway,503,'WECHAT_NOT_READY','微信支付尚未完成配置');return this.wechatGateway;
   }
   async order(id:string):Promise<Order> {
@@ -76,7 +84,7 @@ export class Payments {
       }
       requireThat(Object.hasOwn(client.skus,input.sku as string),400,'INVALID_REQUEST','业务订单或商品参数错误');
       requireThat((client.providers??['alipay']).includes(provider),403,'PROVIDER_NOT_ALLOWED','该产品尚未启用此支付方式');
-      if(provider==='wechat')requireThat(this.env.PAYMENT_MODE==='live'&&this.wechatGateway,503,'WECHAT_NOT_READY','微信支付尚未完成配置');
+      this.requireProviderEnabled(provider);
       const item=client.skus[input.sku as string];
       requireThat(item.enabled!==false,403,'SKU_DISABLED','该商品已停售');
       const requestHash=sha256(JSON.stringify({productOrderId:input.productOrderId,sku:input.sku,returnUrl,amount:item.amount,subject:item.subject,...(provider==='wechat'?{provider}:{})}));
@@ -91,7 +99,7 @@ export class Payments {
     return {...this.view(order,client), checkoutUrl:`${this.env.PAY_BASE_URL}/checkout/${order.id}#token=${checkoutToken(order.id,this.env)}`, productOrderId:order.productOrderId,sku:order.sku};
   }
   view(order:Order,client:ProductClient) {
-    return {id:order.id,provider:providerOf(order),subject:order.subject,amount:order.amount,currency:'CNY',status:order.status,productName:client.name,expiresAt:this.paymentExpiresAt(order),returnUrl:this.returnUrl(order),fulfillmentStatus:order.fulfillmentStatus,mode:order.mode,channels:providerOf(order)==='wechat'?['native']:this.env.ALIPAY_CHANNELS.split(',')};
+    return {id:order.id,provider:providerOf(order),subject:order.subject,amount:order.amount,currency:'CNY',status:order.status,productName:client.name,expiresAt:this.paymentExpiresAt(order),returnUrl:this.returnUrl(order),fulfillmentStatus:order.fulfillmentStatus,mode:order.mode,channels:paymentChannels(this.env,providerOf(order))};
   }
   paymentExpiresAt(order:Order):string {
     if(order.paymentAttempts)return this.activeAttempt(order).expiresAt;
@@ -156,9 +164,10 @@ export class Payments {
   /** Checkout credentials protect both signed Alipay URLs and Native QR data. */
   async pay(id:string,channel:string,pageReturnUrl=`${this.env.PAY_BASE_URL}/payment/return?payment_order_id=${encodeURIComponent(id)}`):Promise<{provider:PaymentProvider;channel:string;paymentUrl?:string;codeUrl?:string}> {
     const existing=await this.order(id),provider=providerOf(existing);
-    requireThat(provider==='wechat'?channel==='native':['page','wap'].includes(channel)&&this.env.ALIPAY_CHANNELS.split(',').includes(channel),400,'INVALID_CHANNEL','支付通道不正确');
+    this.requireProviderEnabled(provider);
+    requireThat(paymentChannels(this.env,provider).includes(channel),400,'INVALID_CHANNEL','支付通道不正确');
     const order=await this.preparePayment(id),attempt=this.activeAttempt(order);
-    if(provider==='alipay')return {provider,channel,paymentUrl:this.gateway.paymentUrl({id:attempt.id,subject:order.subject,totalAmount:order.amount,expiresAt:attempt.expiresAt},{channel:channel as 'page'|'wap',pageReturnUrl,notifyUrl:`${this.env.PAY_BASE_URL}/api/alipay/notify`})};
+    if(provider==='alipay')return {provider,channel,paymentUrl:this.alipayGateway().paymentUrl({id:attempt.id,subject:order.subject,totalAmount:order.amount,expiresAt:attempt.expiresAt},{channel:channel as 'page'|'wap',pageReturnUrl,notifyUrl:`${this.env.PAY_BASE_URL}/api/alipay/notify`})};
     requireThat(this.wechatGateway,503,'WECHAT_NOT_READY','微信支付尚未完成配置');
     if(attempt.codeUrl)return {provider,channel,codeUrl:attempt.codeUrl};
     requireThat(Date.parse(attempt.expiresAt)-this.now()>=90_000,409,'ORDER_NOT_PAYABLE','订单即将过期，请返回产品重新发起');
@@ -239,7 +248,7 @@ export class Payments {
     return this.store.transaction(async tx=>this.applyTradeInTransaction(tx,await this.logicalOrderForTrade(tx,trade.outTradeNo),trade,observedAt));
   }
   async notification(data:Record<string,string>):Promise<Order|null> {
-    requireThat(data.sign_type==='RSA2' && this.gateway.verifyNotification(data),400,'INVALID_SIGNATURE','支付宝通知验签失败');
+    requireThat(data.sign_type==='RSA2' && this.alipayGateway().verifyNotification(data),400,'INVALID_SIGNATURE','支付宝通知验签失败');
     requireThat(data.app_id===this.env.ALIPAY_APP_ID && data.seller_id===this.env.ALIPAY_SELLER_ID,400,'PAYMENT_MISMATCH','应用或收款账户不匹配');
     const order = await this.store.transaction(tx=>this.logicalOrderForTrade(tx,data.out_trade_no));
     requireThat(providerOf(order)==='alipay',400,'PAYMENT_MISMATCH','支付方式与订单不匹配');
@@ -347,6 +356,7 @@ export class Payments {
     requireThat(client&&client.id===order.clientId,403,'CLIENT_DISABLED','订单平台不存在或已停用');
     requireThat(client.enabled!==false,403,'CLIENT_DISABLED','订单平台已停用');
     requireThat((client.providers??['alipay']).includes(providerOf(order)),403,'PROVIDER_NOT_ALLOWED','该产品尚未启用此支付方式');
+    this.requireProviderEnabled(providerOf(order));
     requireThat(Object.hasOwn(client.skus,order.sku)&&client.skus[order.sku].enabled!==false,403,'SKU_DISABLED','订单商品不存在或已停售');
   }
   private async queryAttempt(order:Order,attempt:PaymentAttempt):Promise<Trade|null> {

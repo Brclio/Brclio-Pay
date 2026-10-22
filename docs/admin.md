@@ -101,9 +101,11 @@
 
 ## 环境变量说明
 
-`/admin#environment` 从私有数据仓库 `maintenance/environment/guide.json` 读取每个变量的用途、占位示例、配置位置、修改方法与历史影响，支持搜索和分类。页面只显示变量是否已提供，不返回当前运行值。“维护方式”是约定的 Text 或资源绑定类型；实际 Cloudflare 类型由发布审计核对。
+`/admin#environment` 从私有数据仓库 `maintenance/environment/guide.json` 读取每个变量的用途、占位示例、配置位置、修改方法与历史影响，支持搜索和分类。管理员登录后，可点击每个文本变量的“显示实际值”，查看当前 Worker 正在使用的真实值，包括商户私钥、GitHub App 私钥和管理员认证材料。公开参数直接展示；敏感值默认隐藏，不自动随说明读取。
 
-说明文件独立于订单和其他配置，直接在数据仓库按相同结构修改后刷新页面即可生效，无需发布代码。它只保存说明，编辑它不会改变 Cloudflare 参数。当前值在 Cloudflare 后台 Worker `brclio-pay-unified` 中以 Text 明文维护；`ASSETS` 和三个限流器仍为资源绑定。具体流程见 [environment-variables.md](environment-variables.md)。
+查看接口为 `POST /api/admin/environment/value`，JSON 请求体仅接受 `{"name":"变量名"}`；必须有当前管理员会话、同源请求和 CSRF 校验，产品密钥与短期 AI 授权无权访问。接口读取固定范围的运行绑定，不读写订单或说明文件，不输出日志，响应禁止缓存。页面一次仅临时显示一项，支持手动隐藏或取消读取，60 秒后、切换页面、刷新、退出或浏览器页面隐藏时清除，不写入浏览器存储或公开资源。`ASSETS` 和限流器属于资源绑定，没有可展示的文本值。
+
+说明文件独立于订单和其他配置，直接在数据仓库按相同结构修改后刷新页面即可生效，无需发布代码。它只保存说明，编辑它不会改变 Cloudflare 参数，也不能扩大实际值读取范围。既有生产 Worker `brclio-pay-unified` 按原约定保留 Text；新独立部署凭据使用 Secret，二者在 Worker 中均可读取运行值，具体存储类型需到 Cloudflare 核对。具体流程见 [environment-variables.md](environment-variables.md)。
 
 ## 管理员与明文分片存储
 

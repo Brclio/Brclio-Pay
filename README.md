@@ -1,6 +1,10 @@
 # Brclio Pay
 
-统一的支付宝与微信收银服务，运行在 Cloudflare Workers，通过 Cloudflare Pages 提供 `https://pay.bornforthis.cn` 入口。产品只需使用对应完整 Skill 和单平台受限授权，让项目 AI 接入签名下单、外部收银台、付款通知、幂等权益开通与客户端状态刷新。
+开源的支付宝与微信收银服务，运行在 Cloudflare Workers，可选 Cloudflare Pages 网关。支持部署支付宝 + 微信、仅支付宝或仅微信。现有 Brclio 服务入口为 `https://pay.bornforthis.cn`；自行部署使用自己的账号、域名与私有数据仓库。
+
+首次部署见 [人工 / AI 部署文档](docs/deployment.md)、[环境变量完整清单](docs/environment-variables.md) 与 [商户资料取得方式](docs/merchant-setup.md)。可使用独立 [brclio-pay-deploy 部署 Skill](skills/brclio-pay-deploy/SKILL.md)，或先运行 `npm run setup:deployment -- --help`。初始化工具生成内部密钥及管理员认证参数，只要求所选渠道的商户资料；Cloudflare 和 GitHub App / 私有仓库授权仍由部署者完成。凭据配置在可信服务端，公开文档与 Skill 不包含实际值；部署者登录自己的后台后，可逐项查看当前部署值。
+
+已部署支付中心的产品，使用下列接入 Skill 和单产品受限授权，完成签名下单、外部收银台、付款通知、幂等权益开通与客户端刷新：
 
 | 支付范围 | 完整 Skill |
 | --- | --- |
@@ -8,7 +12,7 @@
 | 仅支付宝 | [brclio-alipay-integrate](skills/brclio-alipay-integrate/SKILL.md) |
 | 仅微信 | [brclio-wechatpay-integrate](skills/brclio-wechatpay-integrate/SKILL.md) |
 
-首页可直接下载三种独立 ZIP；后台选择对应 Skill 后可复制不含凭据的说明、下载完整包，或生成包含完整 Skill 与最长两小时单平台授权的任务。每个包包括协议、项目扫描器、context/plan/apply CLI、后端签名客户端、webhook 模板和无密钥的客户端完成状态模板。通用 Skill 不包含商户、管理员、GitHub 或产品凭据。
+首页可直接下载三种产品接入 ZIP，以及独立的 [部署 Skill ZIP](https://pay.bornforthis.cn/api/skills/brclio-pay-deploy.zip)；后台产品授权仅对应前三种接入 Skill。接入包包括协议、项目扫描器、context/plan/apply CLI、签名客户端、webhook 和客户端完成状态模板；部署包包括人工部署、环境与商户参考资料。通用包不包含商户、管理员、GitHub 或产品凭据。
 
 ## 已实现的支付能力
 
@@ -16,13 +20,13 @@
 
 平台配置 `providers` 控制可使用的支付方式。下单 `provider` 为 `alipay` 或 `wechat`，省略时兼容已有支付宝客户端。每笔订单固选 provider、商品与金额，幂等重试保留原单，不能暗中改价或改变渠道。验签通知与查单确认付款后，订单、稳定 outbox 事件、统计和队列在同一个 Git 提交内落库；产品以持久事务幂等开通权益。
 
-管理员可查看经营概览、订单查询与 CSV、支付宝/微信独立账单、环境变量说明、商品价格、平台配置、短期授权及审计。账单按上海付款月份统计并支持完整 CSV，环境说明独立保存在私有数据仓库。订单可核实关单、重新启用新的付款尝试、验真补记，保留重复实付证据并只通知一次产品权益。营业额表示已确认付款，不代表净结算或退款后收入。退款与退款后的权益调整需要独立实现或人工处理。
+管理员可查看经营概览、订单查询与 CSV、支付宝/微信独立账单、环境变量说明及当前部署值、商品价格、平台配置、短期授权及审计。私密环境值默认隐藏，登录后点击单项查看才读取，并在隐藏、离开维护页或退出时清除页面内容。账单按上海付款月份统计并支持完整 CSV，环境说明独立保存在私有数据仓库。订单可核实关单、重新启用新的付款尝试、验真补记，保留重复实付证据并只通知一次产品权益。营业额表示已确认付款，不代表净结算或退款后收入。退款与退款后的权益调整需要独立实现或人工处理。
 
 Mac、Windows、Android 管理客户端提供同一后台、文件导出及签名版本检查，安装与更新文件托管于 GitHub Releases。[客户端下载](https://pay.bornforthis.cn/clients) · [构建与更新说明](docs/clients.md)。
 
 ## 数据与历史兼容
 
-所有持久业务数据以明文 JSON 保存在指定私有仓库 `BrclioData/BrclioPay-Data`，由 GitHub App 安装令牌读写。订单、事件按上海年月分目录并独立保存，ID 定位索引与业务幂等索引分片保存；平台注册表按平台、授权、计划与年月审计分别保存。商户私钥、GitHub App 私钥和运行凭据留在服务端配置，不进入前端或客户端包。
+所有持久业务数据以明文 JSON 保存在部署者自己的私有 GitHub 数据仓库，由限定该仓库的 GitHub App 安装令牌读写。既有 Brclio 生产服务继续使用 `BrclioData/BrclioPay-Data`。订单、事件按上海年月分目录并独立保存，ID 定位索引与业务幂等索引分片保存；平台注册表按平台、授权、计划与年月审计分别保存。商户私钥、GitHub App 私钥和运行凭据留在服务端配置，仅通过管理员后台按需查看；不进入公开页面、客户端包或临时产品接入授权。
 
 历史支付宝与微信账本迁移保留原始证据、订单身份、金额、事件去重、投递记录和已接入产品凭据；原系统回调及旧链接需要连续兼容。迁移工具与验收记录见 [部署文档](docs/deployment.md) 和 [交付状态](docs/status.md)。部署成功不等于真实到账或产品权益验收完成。
 
@@ -36,7 +40,7 @@ npm run test:security-runtime
 npm run test:migration
 ```
 
-`node scripts/build-skill.mjs` 同步三个完整包的模板与 Worker 内置资源；不向包内写入任何任务凭据。运行时测试使用临时内存密钥和模拟上游，不发起真实付款。
+`node scripts/build-skill.mjs` 同步三个产品接入包、独立部署包及 Worker 内置资源；不向包内写入任何任务凭据。运行时测试使用临时内存密钥和模拟上游，不发起真实付款。
 
 产品协议见 [docs/integration.md](docs/integration.md)，后端示例见 [examples/payment-client.mjs](examples/payment-client.mjs)。部署前核对目标账号、GitHub App 安装范围、原凭据连续性与迁移清单；发布后分别核对域名证书、订单/目录读取、回调边界、真实付款与产品实际开通证据。
 

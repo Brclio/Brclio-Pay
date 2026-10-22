@@ -27,6 +27,16 @@ class Element extends Target {
   reset() {} reportValidity() { return true; } focus() {} select() {} scrollIntoView() {} click() {} remove() {}
 }
 const textOf = (node: Element): string => [node.textContent, ...node.children.map(textOf)].join(' ');
+const descendants = (node: Element): Element[] => [node, ...node.children.flatMap(descendants)];
+function environmentButton(root: Element, name: string) {
+  const button = descendants(root).find(node => node.attributes.get('data-environment-name') === name);
+  if (!button) throw Error(`Missing environment button: ${name}`);
+  return button;
+}
+const revealedFields = (root: Element) => descendants(root).filter(node => node.className === 'environment-revealed-field');
+const deployedValue = (name: string, value: string | null = 'synthetic-runtime-value') => ({
+  name, configured: value !== null && value.trim().length > 0, value, retrievedAt: '2026-10-21T04:00:00.000Z',
+});
 type Call = { path: string; options: RequestInit };
 type Reply = { body: unknown; status?: number };
 const bill = (index: number, provider = 'alipay') => ({
@@ -39,10 +49,12 @@ const guideVariable = (name: string) => ({ name, label: `${name}用途`, descrip
   sensitive: true, example: '<your-value>', location: 'Cloudflare Workers 设置', changeNotes: '保存后生效，后续部署保留控制台配置', maintenance: '需要轮换时更新原变量' });
 const environment = () => ({ document: { schema: 1, title: '环境变量维护说明', updatedAt: '2026-10-21T04:00:00.000Z',
   intro: ['变量在 Cloudflare Text 中维护。'], groups: [
-    { id: 'payment', title: '支付参数', description: '支付运行配置', variables: [guideVariable('CHECKOUT_SECRET')] },
+    { id: 'payment', title: '支付参数', description: '支付运行配置', variables: [guideVariable('CHECKOUT_SECRET'), {...guideVariable('PAY_BASE_URL'),generation:'选定自己的 HTTPS 域名'}] },
     { id: 'bindings', title: '资源绑定', description: '绑定无需改为 Text', variables: [guideVariable('ASSETS')] },
   ], notes: ['说明保存在私有数据仓库。'] },
-  variables: [{ name: 'CHECKOUT_SECRET', configured: true, storageType: 'Text', value: 'never-render-real-value' }, { name: 'ASSETS', configured: true, storageType: 'binding' }],
+  variables: [{ name: 'CHECKOUT_SECRET', configured: true, storageType: 'runtime', disclosure:'public', canReveal: true, value: 'never-render-real-value' },
+    { name: 'PAY_BASE_URL', configured: true, storageType: 'runtime', disclosure:'public', canReveal: true, value: 'https://pay.example.test' },
+    { name: 'ASSETS', configured: true, storageType: 'binding', canReveal: false }],
   source: { repository: 'BrclioData/BrclioPay-Data', path: 'maintenance/environment/guide.json', url: 'https://github.com/BrclioData/BrclioPay-Data/blob/main/maintenance/environment/guide.json', revision: 'a'.repeat(64) }, storageTypeBasis: 'maintenance-convention',
 });
 const report = (items = Array.from({ length: 27 }, (_, index) => bill(index)), query = new URLSearchParams()) => {
@@ -53,7 +65,7 @@ const report = (items = Array.from({ length: 27 }, (_, index) => bill(index)), q
     paidCount: items.length, paidAmountCents: items.length * 1990, items: items.slice(offset, offset + 25), nextCursor: items.length > offset + 25 ? 'next-25' : null,
     coverage: { scope: 'ledger', source: 'canonical', complete: true, sourceOrders: 27, scannedOrders: 27, checkedAt: '2026-10-21T04:00:00.000Z' }, revision: 'a'.repeat(64) };
 };
-async function page(initialPage = 'bills', handler?: (call: Call) => Reply | Promise<Reply>) {
+async function page(initialPage = 'bills', handler?: (call: Call) => Reply | undefined | Promise<Reply | undefined>) {
   const nodes: Element[] = [];
   const ui: Record<string, Element> = {};
   for (const match of html.matchAll(/<[^>]*\bid="([^"]+)"[^>]*>/g)) {
@@ -65,11 +77,11 @@ async function page(initialPage = 'bills', handler?: (call: Call) => Reply | Pro
   const links = [...html.matchAll(/<a[^>]*data-page-link="([^"]+)"[^>]*>/g)].map(match => { const node = new Element(); node.dataset.pageLink = match[1]; nodes.push(node); return node; });
   ui.grantDomainMode.value = 'auto'; ui.grantPricingMode.value = 'detect';
   const allNodes = (node: Element): Element[] => [node, ...node.children.flatMap(allNodes)];
-  const document = { title: '', body: new Element(), getElementById: (id: string) => ui[id],
+  const document = Object.assign(new Target(), { title: '', hidden: false, body: new Element(), getElementById: (id: string) => ui[id],
     createElement: () => { const node = new Element(); nodes.push(node); return node; },
     querySelectorAll: (selector: string) => selector === '[data-page-link]' ? links : selector === '[data-admin-page]' ? Object.values(ui).filter(node => node.dataset.adminPage)
       : selector === '[data-busy-lock]' ? [...new Set(nodes.flatMap(allNodes))].filter(node => node.attributes.has('data-busy-lock')) : [],
-  };
+  });
   const calls: Call[] = [];
   const fetcher = async (path: string, options: RequestInit) => {
     const call = { path, options }; calls.push(call);
@@ -83,6 +95,7 @@ async function page(initialPage = 'bills', handler?: (call: Call) => Reply | Pro
       reply = { body: report(Array.from({ length: 27 }, (_, index) => ({ ...bill(index, query.get('provider') || 'alipay'), clientId: query.get('clientId') || 'product' })), query) };
     }
     if (!reply && path === '/api/admin/environment') reply = { body: environment() };
+    if (!reply && path === '/api/admin/environment/value') reply = { body: deployedValue(JSON.parse(String(options.body)).name) };
     if (!reply && path === '/api/admin/grants' && options.method === 'POST') reply = { body: { prompt: 'Scoped AI integration task', expiresAt: '2026-10-21T05:00:00.000Z', grantId: 'grant-isolated' } };
     const status = reply?.status || 200;
     return { ok: status >= 200 && status < 300, status, json: async () => structuredClone(reply?.body || {}) };
@@ -96,7 +109,7 @@ async function page(initialPage = 'bills', handler?: (call: Call) => Reply | Pro
   runInNewContext(source, { document, window, location: { hash: `#${initialPage}`, origin: 'https://pay.example.test' }, history: { replaceState() {} },
     navigator: { clipboard }, fetch: fetcher, crypto: { randomUUID }, URL: BrowserURL, Blob, URLSearchParams, AbortController, Date, Intl }, { filename: 'public/admin.js' });
   await vi.advanceTimersByTimeAsync(0);
-  return { ui, calls, window, exportBlobs, links, clipboard };
+  return { ui, calls, window, document, exportBlobs, links, clipboard };
 }
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
@@ -154,8 +167,12 @@ describe('repository-backed environment maintenance guide', () => {
     expect(p.ui.environmentSource.textContent).toContain('maintenance/environment/guide.json');
     expect(p.ui.environmentSource.children).toHaveLength(1);
     const displayed = textOf(p.ui.environmentGroups);
-    expect(displayed).toContain('Cloudflare Text（明文）'); expect(displayed).toContain('Cloudflare 资源绑定'); expect(displayed).toContain('已配置');
+    expect(displayed).toContain('Cloudflare 服务端变量'); expect(displayed).toContain('Cloudflare 资源绑定'); expect(displayed).toContain('已配置');
     expect(displayed).toContain('保存后生效'); expect(displayed).toContain('需要轮换时'); expect(displayed).not.toContain('never-render-real-value');
+    expect(displayed).toContain('https://pay.example.test');expect(displayed).toContain('选定自己的 HTTPS 域名');expect(displayed).toContain('点击下方按钮查看实际值');
+    expect(environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').textContent).toBe('显示实际值');
+    expect(descendants(p.ui.environmentGroups).some(node => node.attributes.get('data-environment-name') === 'ASSETS')).toBe(false);
+    expect(p.calls.some(call => call.path === '/api/admin/environment/value')).toBe(false);
     p.ui.environmentGroup.value = 'bindings'; await p.ui.environmentGroup.emit('change'); expect(p.ui.environmentGroups.children).toHaveLength(1); expect(textOf(p.ui.environmentGroups)).toContain('ASSETS');
     p.ui.environmentGroup.value = ''; p.ui.environmentSearch.value = 'checkout_secret'; await p.ui.environmentSearch.emit('input');
     expect(p.ui.environmentGroups.children).toHaveLength(1); expect(textOf(p.ui.environmentGroups)).not.toContain('ASSETS');
@@ -169,6 +186,107 @@ describe('repository-backed environment maintenance guide', () => {
     expect(p.ui.environmentGroups.children).toHaveLength(2);
     await p.ui.reloadEnvironmentButton.emit('click'); expect(p.ui.environmentGroups.children).toHaveLength(0); expect(p.ui.environmentSource.textContent).toBe('');
     expect(p.ui.environmentMessage.hidden).toBe(false); expect(p.ui.environmentMessage.textContent).toContain('尚未准备');
+  });
+
+  it('reveals an exact multiline value only on explicit POST and never replays it from the guide cache', async () => {
+    const firstValue = '-----BEGIN SYNTHETIC KEY-----\n  <script>literal value</script>\n-----END SYNTHETIC KEY-----\n';
+    let reveals = 0;
+    const p = await page('environment', call => call.path === '/api/admin/environment/value'
+      ? { body: deployedValue('CHECKOUT_SECRET', ++reveals === 1 ? firstValue : 'fresh-second-value') } : undefined);
+    expect(textOf(p.ui.environmentGroups)).not.toContain(firstValue);
+    await environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').emit('click');
+    const call = p.calls.find(call => call.path === '/api/admin/environment/value')!;
+    expect(call.options).toMatchObject({ method: 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+    expect(new Headers(call.options.headers).get('X-CSRF-Token')).toBe('isolated-csrf');
+    expect(JSON.parse(String(call.options.body))).toEqual({ name: 'CHECKOUT_SECRET' });
+    expect(revealedFields(p.ui.environmentGroups)).toHaveLength(1);
+    expect(revealedFields(p.ui.environmentGroups)[0].children[1].textContent).toBe(firstValue);
+    expect(p.clipboard.writeText).not.toHaveBeenCalled();
+    await environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').emit('click');
+    expect(revealedFields(p.ui.environmentGroups)).toHaveLength(0);
+    expect(textOf(p.ui.environmentGroups)).not.toContain(firstValue);
+    await p.links.find(link => link.dataset.pageLink === 'bills')!.emit('click');
+    await p.links.find(link => link.dataset.pageLink === 'environment')!.emit('click');
+    expect(revealedFields(p.ui.environmentGroups)).toHaveLength(0);
+    expect(p.calls.filter(call => call.path === '/api/admin/environment')).toHaveLength(1);
+    expect(p.calls.filter(call => call.path === '/api/admin/environment/value')).toHaveLength(1);
+    await environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').emit('click');
+    expect(revealedFields(p.ui.environmentGroups)[0].children[1].textContent).toBe('fresh-second-value');
+    expect(p.calls.filter(call => call.path === '/api/admin/environment/value')).toHaveLength(2);
+  });
+
+  it('retains only the latest explicitly revealed variable', async () => {
+    const p = await page('environment', call => call.path === '/api/admin/environment/value'
+      ? { body: deployedValue(JSON.parse(String(call.options.body)).name, `deployed-${JSON.parse(String(call.options.body)).name}`) } : undefined);
+    await environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').emit('click');
+    expect(textOf(p.ui.environmentGroups)).toContain('deployed-CHECKOUT_SECRET');
+    await environmentButton(p.ui.environmentGroups, 'PAY_BASE_URL').emit('click');
+    expect(revealedFields(p.ui.environmentGroups)).toHaveLength(1);
+    expect(textOf(p.ui.environmentGroups)).toContain('deployed-PAY_BASE_URL');
+    expect(textOf(p.ui.environmentGroups)).not.toContain('deployed-CHECKOUT_SECRET');
+  });
+
+  it.each(['timeout', 'search', 'group', 'submit', 'reload', 'navigation', 'pagehide', 'visibilitychange', 'logout'])(
+    'clears a revealed runtime value on %s', async action => {
+      const p = await page('environment');
+      await environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').emit('click');
+      expect(textOf(p.ui.environmentGroups)).toContain('synthetic-runtime-value');
+      if (action === 'timeout') await vi.advanceTimersByTimeAsync(60000);
+      else if (action === 'search') await p.ui.environmentSearch.emit('input');
+      else if (action === 'group') { p.ui.environmentGroup.value = 'payment'; await p.ui.environmentGroup.emit('change'); }
+      else if (action === 'submit') await p.ui.environmentFilters.emit('submit');
+      else if (action === 'reload') await p.ui.reloadEnvironmentButton.emit('click');
+      else if (action === 'navigation') await p.links.find(link => link.dataset.pageLink === 'bills')!.emit('click');
+      else if (action === 'pagehide') await p.window.emit('pagehide');
+      else if (action === 'visibilitychange') { p.document.hidden = true; await p.document.emit('visibilitychange'); }
+      else await p.ui.logoutButton.emit('click');
+      expect(textOf(p.ui.environmentGroups)).not.toContain('synthetic-runtime-value');
+      expect(revealedFields(p.ui.environmentGroups)).toHaveLength(0);
+      expect(p.calls.filter(call => call.path === '/api/admin/environment/value')).toHaveLength(1);
+    });
+
+  it.each([
+    { ...deployedValue('ADMIN_SESSION_SECRET', 'must-not-render'), name: 'ADMIN_SESSION_SECRET' },
+    { ...deployedValue('CHECKOUT_SECRET'), value: { secret: 'must-not-render' } },
+    { ...deployedValue('CHECKOUT_SECRET', 'must-not-render'), retrievedAt: 'invalid-date' },
+  ])('rejects a malformed or mismatched reveal response', async body => {
+    const p = await page('environment', call => call.path === '/api/admin/environment/value' ? { body } : undefined);
+    await environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').emit('click');
+    expect(revealedFields(p.ui.environmentGroups)).toHaveLength(0);
+    expect(textOf(p.ui.environmentGroups)).not.toContain('must-not-render');
+    expect(p.ui.environmentMessage.textContent).toContain('读取结果不完整');
+    expect(p.ui.environmentMessage.textContent).not.toContain('must-not-render');
+    expect(environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').textContent).toBe('显示实际值');
+  });
+
+  it.each(['cancel', 'leave-and-return', 'logout'])('discards a late response after %s while keeping cancellation usable', async action => {
+    let finish!: (reply: Reply) => void;
+    const pending = new Promise<Reply>(resolve => { finish = resolve; });
+    const p = await page('environment', call => call.path === '/api/admin/environment/value' ? pending : undefined);
+    await environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').emit('click');
+    const cancel = environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET');
+    expect(cancel.textContent).toBe('取消查看'); expect(cancel.disabled).toBe(false);
+    expect(p.ui.logoutButton.disabled).toBe(false);
+    if (action === 'cancel') await cancel.emit('click');
+    else if (action === 'leave-and-return') {
+      await p.links.find(link => link.dataset.pageLink === 'bills')!.emit('click');
+      await p.links.find(link => link.dataset.pageLink === 'environment')!.emit('click');
+      expect(p.ui.environmentPage.hidden).toBe(false);
+    } else {
+      await p.ui.logoutButton.emit('click'); expect(p.ui.loginView.hidden).toBe(false);
+    }
+    finish({ body: deployedValue('CHECKOUT_SECRET', 'late-value-must-not-appear') });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(revealedFields(p.ui.environmentGroups)).toHaveLength(0);
+    expect(textOf(p.ui.environmentGroups)).not.toContain('late-value-must-not-appear');
+    expect(p.calls.filter(call => call.path === '/api/admin/environment/value')).toHaveLength(1);
+  });
+
+  it.each([{ value: '', label: '空字符串（""）' }, { value: null, label: '未设置' }])('distinguishes an absent value from an empty string', async ({ value, label }) => {
+    const p = await page('environment', call => call.path === '/api/admin/environment/value'
+      ? { body: deployedValue('CHECKOUT_SECRET', value) } : undefined);
+    await environmentButton(p.ui.environmentGroups, 'CHECKOUT_SECRET').emit('click');
+    expect(revealedFields(p.ui.environmentGroups)[0].children[1].textContent).toBe(label);
   });
 });
 
