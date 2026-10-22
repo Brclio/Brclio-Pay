@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows -or $env:GITHUB_ACTIONS -ne 'true') { throw 'This verification requires an isolated native Windows GitHub Actions runner.' }
 . (Join-Path $PSScriptRoot 'windows-certificate-policy.ps1')
+. (Join-Path $PSScriptRoot 'windows-certificate-consent-fixture.ps1')
 $expected = Get-ExpectedWindowsSigningIdentity
 $settings = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../shared/release-settings.json') | ConvertFrom-Json
 $currentVersion = [string]$settings.version
@@ -50,7 +51,21 @@ function Invoke-IsolatedUserTrust {
   $process = [System.Diagnostics.Process]::Start($info)
   try {
     $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(30000)) { $process.Kill($true); $process.WaitForExit(); Write-Host ($stderr.GetAwaiter().GetResult()); throw 'CurrentUser certificate operation exceeded its 30 second process deadline.' }
+    $consentFixture=$null; $lastDialog=$null; $deadline=[DateTime]::UtcNow.AddSeconds(30)
+    while (-not $process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
+      if ($Operation -eq 'addstore' -and $Store -eq 'Root' -and $null -eq $consentFixture) {
+        $dialog=[BrclioOwnedCertificateConsent]::TryApprove($process.Id,$expected.Identity.publisher,$expected.Identity.certificateThumbprintSha1)
+        if ($dialog.Ambiguous) { $process.Kill($true); throw 'Certificate consent fixture found ambiguous importer-owned dialogs.' }
+        if ($dialog.DialogText) { $lastDialog=$dialog }
+        if ($dialog.Approved) {
+          $consentFixture=[ordered]@{scope='human-consent-fixture-ephemeral-windows-runner';importerPid=$process.Id;nativeDialogClass='#32770';title=$dialog.Title;dialogText=$dialog.DialogText;dialogTextSha256=$dialog.DialogTextSha256;publisherMatched=$dialog.PublisherMatched;fingerprintMatched=$dialog.FingerprintMatched;ownedProcessMatched=$dialog.OwnedProcessMatched;certificateThumbprintSha1=$expected.Identity.certificateThumbprintSha1;approvedControlId=$dialog.ApprovedControlId}
+          Write-Host ($consentFixture | ConvertTo-Json -Compress)
+        }
+      }
+      $null=$process.WaitForExit(200)
+    }
+    if (-not $process.HasExited) { $process.Kill($true); $process.WaitForExit(); if($lastDialog){Write-Host ($lastDialog | ConvertTo-Json -Compress)}; Write-Host ($stderr.GetAwaiter().GetResult()); throw 'CurrentUser certificate operation exceeded its 30 second process deadline.' }
+    if ($Operation -eq 'addstore' -and $Store -eq 'Root' -and $null -eq $consentFixture) { throw 'Expected exact native certificate consent fixture was not observed.' }
     $output = $stdout.GetAwaiter().GetResult(); $diagnostic = $stderr.GetAwaiter().GetResult()
     if ($process.ExitCode -ne 0) { Write-Host $diagnostic; throw ('CurrentUser certificate operation failed with exit code ' + $process.ExitCode + '.') }
     $operationEvidence = $output | ConvertFrom-Json
@@ -67,7 +82,7 @@ function Invoke-IsolatedUserTrust {
   }
   Write-VerificationProgress ('Cert provider logical visibility after ' + $Operation + ' ' + $Store + ': ' + $present)
   Write-VerificationProgress ('Completed bounded CurrentUser certificate operation: ' + $Operation + ' ' + $Store)
-  return [pscustomobject]@{ scope='CurrentUser'; provider='CryptUIWizImport_NO_UI'; store=$Store; operation=$Operation; verified=$true; physicalStorePresenceVerified=$true; logicalStoreVisible=$present; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
+  return [pscustomobject]@{ scope='CurrentUser'; provider='CryptUIWizImport_NO_UI'; store=$Store; operation=$Operation; verified=$true; physicalStorePresenceVerified=$true; logicalStoreVisible=$present; consentFixture=$consentFixture; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
 }
 
 function Install-Package([string]$Path) {
@@ -168,6 +183,7 @@ $signingEvidence['trustStoresAbsentBeforeVerification'] = $true
 $signingEvidence['trustProviderDocumentation'] = 'https://learn.microsoft.com/en-us/windows/win32/api/cryptuiapi/nf-cryptuiapi-cryptuiwizimport'
 $signingEvidence['physicalStoreDocumentation'] = 'https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore'
 $signingEvidence['unprotectedFlagUsed'] = $false
+$signingEvidence['consentVerificationScope'] = 'human-consent-fixture-ephemeral-windows-runner'
 $signingEvidence['trustStoreOperations'] = @($trustOperations)
 if ($OriginalBuildRun) {
   foreach ($record in @($evidence,$signingEvidence)) {
