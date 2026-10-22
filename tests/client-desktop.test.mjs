@@ -103,14 +103,14 @@ test('failed Mac validation reopens only the untouched original verified app',as
   commands.length=0;
   assert.equal(await recoverUntouched(c,async()=>{},{readInode:async()=> 'changed:inode',execute}),false);assert.deepEqual(commands,[]);
 });
-test('Mac installer manifest seals regular bytes, permissions and internal links',async()=>{
+test('Mac installer manifest seals regular bytes, permissions and internal links',{skip:process.platform==='win32'},async()=>{
  const {makeManifest}=require('../clients/desktop/mac/after-sign.cjs'),dir=await fs.mkdtemp(path.join(os.tmpdir(),'brclio-mac-install-manifest-'));
  try{await fs.mkdir(path.join(dir,'Contents'));await fs.writeFile(path.join(dir,'Contents','payload'),'version-one',{mode:0o644});await fs.symlink('Contents',path.join(dir,'linked'),'dir');
   const before=await makeManifest(dir);assert.match(before,/F\t[0-7]+\t[a-f0-9]{64}\tContents\/payload/);assert.match(before,/L\t[0-7]+\t[a-f0-9]{64}\tlinked/);
   await fs.writeFile(path.join(dir,'Contents','payload'),'version-two');assert.notEqual(await makeManifest(dir),before);
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
-test('Mac installer manifest refuses outward links and hard-linked content',async()=>{
+test('Mac installer manifest refuses outward links and hard-linked content',{skip:process.platform==='win32'},async()=>{
  const {makeManifest}=require('../clients/desktop/mac/after-sign.cjs'),dir=await fs.mkdtemp(path.join(os.tmpdir(),'brclio-mac-install-paths-'));
  try{await fs.symlink('../outside',path.join(dir,'escape'));await assert.rejects(makeManifest(dir),/Unsafe application symlink/);await fs.unlink(path.join(dir,'escape'));
   await fs.writeFile(path.join(dir,'one'),'test');await fs.link(path.join(dir,'one'),path.join(dir,'two'));await assert.rejects(makeManifest(dir),/hard-linked/);
