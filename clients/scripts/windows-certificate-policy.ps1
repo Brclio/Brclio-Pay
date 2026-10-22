@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 function Get-ExpectedWindowsSigningIdentity {
   $shared = Join-Path $PSScriptRoot '../shared'
-  $identity = Get-Content -Raw -LiteralPath (Join-Path $shared 'windows-signing-identity.json') | ConvertFrom-Json
+  $identity = Get-Content -Raw -LiteralPath (Join-Path $shared 'windows-signing-identity.json') | ConvertFrom-Json -DateKind String
   $certificatePath = (Resolve-Path -LiteralPath (Join-Path $shared 'windows-signing-certificate.cer')).Path
   $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificatePath)
   $digest = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($certificate.RawData)).ToLowerInvariant()
