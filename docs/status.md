@@ -2,6 +2,10 @@
 
 核验日期：2026-10-22（Asia/Shanghai）。
 
+## 2026-10-22 全面复核
+
+550 项测试及支付/安全运行时检查重新通过，线上目录、账本与报表只读核对完整；安装包、主/备用更新签名和九个 GitHub 发布文件均与原始发布一致。30 个 Text 变量及四个资源绑定保持原值，客户端源码与发布标签相同。详见 [本次上线复核记录](release-verification-2026-10-22.md)，其中分别注明本轮重测、既有原生升级证据及实际付款验证范围。
+
 ## 1.2.0 管理客户端（客户端版本 1.0.0）
 
 - [GitHub 正式发布 client-v1.0.0](https://github.com/Brclio/Brclio-Pay/releases/tag/client-v1.0.0) 提供 Mac Apple 芯片与 Intel DMG、对应 ZIP 更新包、Windows x64 安装程序和 Android 通用 APK。六个文件及三个元数据文件的远端大小、SHA-256 与本地逐一一致，源码标签为 `839c5a8acc07abe40eeb5b66abfeadad238bd61d`。
