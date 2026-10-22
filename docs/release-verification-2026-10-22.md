@@ -1,6 +1,6 @@
 # 2026-10-22 上线复核
 
-当前服务版本为 1.2.0，管理客户端为 1.0.0。下载入口：[pay.bornforthis.cn/clients](https://pay.bornforthis.cn/clients)；安装包与原始审计文件：[client-v1.0.0](https://github.com/Brclio/Brclio-Pay/releases/tag/client-v1.0.0)。
+此记录对应当日较早的服务 1.2.0、客户端 1.0.0 复核；后续自签版本见 [1.0.1 核验记录](release-verification-client-1.0.1-2026-10-22.md)。下载入口：[pay.bornforthis.cn/clients](https://pay.bornforthis.cn/clients)；本记录的安装包与原始审计文件：[client-v1.0.0](https://github.com/Brclio/Brclio-Pay/releases/tag/client-v1.0.0)。
 
 ## 本轮重新执行
 
