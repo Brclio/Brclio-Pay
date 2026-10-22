@@ -36,6 +36,37 @@ $executable = Join-Path $installation 'Brclio Pay.exe'
 $stores = @('Cert:\CurrentUser\Root','Cert:\CurrentUser\TrustedPublisher')
 foreach ($store in $stores) { if (Test-Path -LiteralPath (Join-Path $store $expected.Identity.certificateThumbprintSha1)) { throw 'The verification user already trusts this publisher; the untrusted test would not be meaningful.' } }
 $addedStores = [System.Collections.Generic.List[string]]::new()
+$trustOperations = [System.Collections.Generic.List[object]]::new()
+
+# certutil -user targets the isolated runner account only; -f avoids a headless Root confirmation UI.
+# https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/certutil
+function Invoke-IsolatedUserTrust {
+  param([ValidateSet('Root','TrustedPublisher')][string]$Store,[ValidateSet('addstore','delstore')][string]$Operation)
+  Write-VerificationProgress ('Begin bounded CurrentUser certificate operation: ' + $Operation + ' ' + $Store)
+  $info = [System.Diagnostics.ProcessStartInfo]::new()
+  $info.FileName = Join-Path $env:SystemRoot 'System32/certutil.exe'
+  $info.UseShellExecute = $false; $info.CreateNoWindow = $true; $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
+  foreach ($argument in @('-user','-f',('-' + $Operation),$Store)) { $info.ArgumentList.Add($argument) }
+  $target = if ($Operation -eq 'addstore') { $expected.CertificatePath } else { $expected.Identity.certificateThumbprintSha1 }
+  $info.ArgumentList.Add($target)
+  $process = [System.Diagnostics.Process]::Start($info)
+  try {
+    $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(30000)) { $process.Kill($true); throw 'CurrentUser certificate operation exceeded its 30 second process deadline.' }
+    $null = $stdout.GetAwaiter().GetResult(); $null = $stderr.GetAwaiter().GetResult()
+    if ($process.ExitCode -ne 0) { throw ('CurrentUser certificate operation failed with exit code ' + $process.ExitCode + '.') }
+  } finally { $process.Dispose() }
+  $location = 'Cert:\CurrentUser\' + $Store + '\' + $expected.Identity.certificateThumbprintSha1
+  $present = Test-Path -LiteralPath $location
+  if ($Operation -eq 'addstore') {
+    if (-not $present) { throw 'Expected public certificate was not added to the isolated CurrentUser store.' }
+    $stored = Get-Item -LiteralPath $location
+    $digest = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($stored.RawData)).ToLowerInvariant()
+    if ($digest -cne $expected.Identity.certificateSha256 -or $stored.HasPrivateKey) { throw 'Isolated CurrentUser trust entry does not match the fixed public certificate.' }
+  } elseif ($present) { throw 'Isolated CurrentUser certificate cleanup did not remove the fixed trust entry.' }
+  Write-VerificationProgress ('Completed bounded CurrentUser certificate operation: ' + $Operation + ' ' + $Store)
+  return [pscustomobject]@{ scope='CurrentUser'; store=$Store; operation=$Operation; verified=$true; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
+}
 
 function Install-Package([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'A reviewed installer is missing.' }
@@ -95,9 +126,8 @@ try {
   $uninstaller = $uninstallers[0].FullName
   $beforeTrust = @($beforeInstaller,(Read-WindowsAuthenticodeEvidence -Path $executable -Expected $expected -RequiredStatus 'UntrustedRoot'),(Read-WindowsAuthenticodeEvidence -Path $uninstaller -Expected $expected -RequiredStatus 'UntrustedRoot'))
   foreach ($store in $stores) {
-    Write-VerificationProgress ('Import isolated public trust: ' + $store)
-    Import-Certificate -FilePath $expected.CertificatePath -CertStoreLocation $store | Out-Null
     $addedStores.Add($store)
+    $trustOperations.Add((Invoke-IsolatedUserTrust -Store (Split-Path -Leaf $store) -Operation 'addstore'))
   }
   $afterTrust = @((Read-WindowsAuthenticodeEvidence -Path $Installer -Expected $expected -RequiredStatus 'Valid'),(Read-WindowsAuthenticodeEvidence -Path $executable -Expected $expected -RequiredStatus 'Valid'),(Read-WindowsAuthenticodeEvidence -Path $uninstaller -Expected $expected -RequiredStatus 'Valid'))
   Write-VerificationProgress 'All three components are valid after isolated CurrentUser trust.'
@@ -120,11 +150,15 @@ try {
   }
 } finally {
   foreach ($store in $addedStores) {
-    Write-VerificationProgress ('Remove isolated public trust: ' + $store)
-    Remove-Item -LiteralPath (Join-Path $store $expected.Identity.certificateThumbprintSha1) -ErrorAction Stop
+    if (Test-Path -LiteralPath (Join-Path $store $expected.Identity.certificateThumbprintSha1)) {
+      $trustOperations.Add((Invoke-IsolatedUserTrust -Store (Split-Path -Leaf $store) -Operation 'delstore'))
+    }
+    if (Test-Path -LiteralPath (Join-Path $store $expected.Identity.certificateThumbprintSha1)) { throw 'An isolated CurrentUser trust addition remains after verification.' }
   }
 }
 $signingEvidence['currentUserTrustRemovedAfterVerification'] = $true
+$signingEvidence['trustStoresAbsentBeforeVerification'] = $true
+$signingEvidence['trustStoreOperations'] = @($trustOperations)
 if ($OriginalBuildRun) {
   foreach ($record in @($evidence,$signingEvidence)) {
     $record['originalBuildRun']=$OriginalBuildRun; $record['originalArtifactId']=$OriginalArtifactId; $record['originalArtifactSha256']=$OriginalArtifactSha256; $record['originalInstallerSha256']=$installerDigest
