@@ -50,6 +50,7 @@ jobs:
           [ordered]@{schema=1;applicationSourceRevision=$run.head_sha;verifierRevision=$env:GITHUB_SHA;originalBuildRun=$run.html_url;originalArtifactId='12400106654';originalArtifactSha256='e499d23204dd03be307ae5e50867f677f5486a592061a92edddaa153a092215c';installerSha256='d8227773e0689af5b1416dbb92c11091065bdc8fc670ada4e3aa65de72cd7986';rebuildPerformed=$false;privateSigningIdentityLoaded=$false} | ConvertTo-Json | Set-Content -Encoding utf8 artifacts/windows-native/windows-build-origin.json
           Write-Host 'Pinned original source, archive, and signed installer bytes verified; no rebuild or signing.'
       - name: Probe fixed public certificate with bounded physical CurrentUser trust
+        if: ${{ inputs.probeOnly }}
         shell: pwsh
         run: ./clients/ci/windows-trust-probe.ps1 -Installer 'dist-clients/Brclio-Pay-1.0.1-windows-x64-setup.exe' -OutputDirectory 'artifacts/windows-native'
       - name: Download exact published unsigned upgrade seed
