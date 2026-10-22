@@ -43,7 +43,7 @@
           <div class="installation-links"><a id="windowsCertificate" class="button button-secondary" aria-disabled="true">下载公钥证书 .cer</a><a id="windowsSigningGuide" class="text-link" aria-disabled="true">下载签名与安装说明 ↗</a></div>
           <div id="windowsSigningIdentity" class="signing-identity"></div>
           <ol class="installation-steps"><li>先核对安装程序和公钥证书的 SHA-256，再按本版说明查看 Authenticode 签名。</li><li>如你决定信任 Brclio Pay 自签证书，按说明将它导入<strong>当前用户</strong>的受信任根与受信任发布者，然后确认安装程序签名显示 <code>Valid</code>。</li><li>打开安装程序，按系统提示确认。安装说明也包含撤销这张证书信任的方法。</li></ol>
-          <p class="installation-note">自签名不代表公共证书机构或 Microsoft 已验证发布者身份，系统默认不会自动信任。导入后 SmartScreen 仍可能提示；客户端不会关闭 Defender 或修改组织策略。公钥证书不包含私钥。</p>
+          <p class="installation-note">自签名不代表公共证书机构或 Microsoft 已验证发布者身份。未信任根可能显示 UnknownError，仅原生错误 0x800B0109 可明确归类为未信任根，其它错误不能忽略。须先核对固定公钥与本版文件 SHA-256，导入后必须显示 Valid。SmartScreen 仍可能提示；客户端不会关闭 Defender 或修改组织策略。公钥证书不包含私钥。</p>
         </div></details>
         <details class="installation-platform"><summary><span>03</span><strong>Android · 由系统确认安装与更新</strong></summary><div class="installation-content"><p>下载 APK 后，根据 Android 提示为当前下载来源允许安装。后续可在客户端点击“检查更新”；下载完成会核验文件摘要、应用身份、版本和同一签名证书，再交给系统安装器由你确认。</p></div></details>
       </div>

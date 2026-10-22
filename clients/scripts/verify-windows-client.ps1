@@ -56,7 +56,7 @@ function Read-Smoke([string]$Version,[string]$Label) {
 }
 
 try {
-  $beforeInstaller = Read-WindowsAuthenticodeEvidence -Path $Installer -Expected $expected -RequiredStatus 'NotTrusted'
+  $beforeInstaller = Read-WindowsAuthenticodeEvidence -Path $Installer -Expected $expected -RequiredStatus 'UntrustedRoot'
   Install-Package $SeedInstaller
   $before = Read-Smoke $SeedVersion 'windows-before-upgrade'
   $marker = Join-Path $profile 'retained-client-setting.json'
@@ -68,7 +68,7 @@ try {
   $uninstallers = @(Get-ChildItem -LiteralPath $installation -Filter '*Uninstall*.exe' -File)
   if ($uninstallers.Count -ne 1) { throw 'Expected one signed NSIS uninstaller.' }
   $uninstaller = $uninstallers[0].FullName
-  $beforeTrust = @($beforeInstaller,(Read-WindowsAuthenticodeEvidence -Path $executable -Expected $expected -RequiredStatus 'NotTrusted'),(Read-WindowsAuthenticodeEvidence -Path $uninstaller -Expected $expected -RequiredStatus 'NotTrusted'))
+  $beforeTrust = @($beforeInstaller,(Read-WindowsAuthenticodeEvidence -Path $executable -Expected $expected -RequiredStatus 'UntrustedRoot'),(Read-WindowsAuthenticodeEvidence -Path $uninstaller -Expected $expected -RequiredStatus 'UntrustedRoot'))
   foreach ($store in $stores) {
     Import-Certificate -FilePath $expected.CertificatePath -CertStoreLocation $store | Out-Null
     $addedStores.Add($store)

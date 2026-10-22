@@ -33,13 +33,16 @@ if ($null -eq $signature.SignerCertificate -or $signature.SignerCertificate.Thum
   throw '安装程序签名证书不匹配，已停止。'
 }
 $signature | Format-List Status, StatusMessage
+Get-FileHash -Algorithm SHA256 -LiteralPath $installerPath | Format-List Hash, Path
 ```
 
-尚未信任证书时，签名状态可能为 `NotTrusted`。`HashMismatch`、缺失签名或证书不匹配时请停止安装。安装文件本身的 SHA-256 还应与下载页的本版摘要相同。
+尚未通过系统信任时，PowerShell 可能将未信任根映射为 `UnknownError`。这个状态本身不能说明原因，更不能当作签名正常；只有原生 `WinVerifyTrust` 返回 `0x800B0109`（`CERT_E_UNTRUSTEDROOT`）才能明确归类为未信任根。`NotTrusted` 也可能代表显式不信任，不能自动忽略。`HashMismatch`、缺失签名、证书不匹配或其它错误时请停止安装。
+
+此时不要运行安装程序。先确保公钥证书 SHA-256 与上方固定值完全一致，并确保安装文件 SHA-256 与官方下载页已验签的本版摘要完全一致，再决定是否按下一节为这张固定公钥建立信任。导入后必须重新校验为 `Valid`；仍是 `UnknownError` 或其它失败时，请停止并撤销该信任。
 
 ## 2. 自愿为当前用户建立信任
 
-只有核对完来源、证书和安装文件后，才执行本节。导入会让当前用户信任由这把证书密钥签名的代码；这不是只对一个文件生效的临时例外。无须管理员 PowerShell，也不导入到 LocalMachine。
+只有核对完来源、固定证书和本版安装文件的 SHA-256 后，才执行本节。这里依据已验签发布清单决定是否信任固定公钥，不是把 `UnknownError` 视为正常。导入会让当前用户信任由这把证书密钥签名的代码；这不是只对一个文件生效的临时例外。无须管理员 PowerShell，也不导入到 LocalMachine。
 
 ```powershell
 Import-Certificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
@@ -68,4 +71,4 @@ Remove-Item -LiteralPath 'Cert:\CurrentUser\TrustedPublisher\@@CERT_SHA1@@' -Err
 
 客户端更新继续使用固定 RSA 公钥验签，并核对版本、官方 GitHub URL、文件大小和 SHA-256；Windows Authenticode 证书信任与更新清单验签是两项独立校验。
 
-参考：[Microsoft PowerShell 签名说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_signing)、[Get-AuthenticodeSignature](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature?view=powershell-7.5)。
+参考：[Microsoft PowerShell 签名说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_signing)、[Get-AuthenticodeSignature](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature?view=powershell-7.5)、[PowerShell 官方状态映射源码](https://github.com/PowerShell/PowerShell/blob/v7.6.7/src/System.Management.Automation/security/MshSignature.cs)。

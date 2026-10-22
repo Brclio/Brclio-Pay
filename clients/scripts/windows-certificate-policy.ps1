@@ -20,11 +20,18 @@ function Get-ExpectedWindowsSigningIdentity {
   return [pscustomobject]@{ Identity=$identity; Certificate=$certificate; CertificatePath=$certificatePath }
 }
 function Read-WindowsAuthenticodeEvidence {
-  param([Parameter(Mandatory=$true)][string]$Path,[Parameter(Mandatory=$true)]$Expected,[Parameter(Mandatory=$true)][ValidateSet('NotTrusted','Valid')][string]$RequiredStatus)
+  param([Parameter(Mandatory=$true)][string]$Path,[Parameter(Mandatory=$true)]$Expected,[Parameter(Mandatory=$true)][ValidateSet('UntrustedRoot','Valid')][string]$RequiredStatus)
   $signature = Get-AuthenticodeSignature -LiteralPath $Path
-  if ([string]$signature.Status -ne $RequiredStatus -or $null -eq $signature.SignerCertificate) { throw "Unexpected Authenticode status for $([IO.Path]::GetFileName($Path)): $($signature.Status)." }
+  # PowerShell maps CERT_E_UNTRUSTEDROOT to UnknownError; NotTrusted means explicit distrust.
+  # Keep this strict: a missing/changed native DWORD field is an audit failure, not a fallback.
+  $nativeField = [System.Management.Automation.Signature].GetField('_win32Error',([System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic))
+  if ($null -eq $nativeField -or $nativeField.FieldType -ne [uint32]) { throw 'The native Authenticode trust result is unavailable.' }
+  $rawStatus = [string]$signature.Status
+  $rawCode = '0x{0:X8}' -f $nativeField.GetValue($signature)
+  $expectedTrustState = if ($RequiredStatus -eq 'UntrustedRoot') { $rawStatus -ceq 'UnknownError' -and $rawCode -ceq '0x800B0109' } else { $rawStatus -ceq 'Valid' -and $rawCode -ceq '0x00000000' }
+  if (-not $expectedTrustState -or $null -eq $signature.SignerCertificate) { throw "Unexpected Authenticode result for $([IO.Path]::GetFileName($Path)): $rawStatus / $rawCode / $($signature.StatusMessage)." }
   $certificate = $signature.SignerCertificate
   $digest = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($certificate.RawData)).ToLowerInvariant()
   if ($digest -cne $Expected.Identity.certificateSha256 -or $certificate.Thumbprint -cne $Expected.Identity.certificateThumbprintSha1 -or $certificate.Subject -cne $Expected.Certificate.Subject -or $certificate.Issuer -cne $Expected.Certificate.Issuer) { throw 'Authenticode publisher certificate does not match the pinned identity.' }
-  return [pscustomobject][ordered]@{ name=[IO.Path]::GetFileName($Path); status=[string]$signature.Status; subject=$certificate.Subject; issuer=$certificate.Issuer; publisher=$certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false); certificateSha256=$digest; thumbprintSha1=$certificate.Thumbprint; fileSha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant() }
+  return [pscustomobject][ordered]@{ name=[IO.Path]::GetFileName($Path); status=$RequiredStatus; rawStatus=$rawStatus; rawWin32ErrorHex=$rawCode; statusMessage=$signature.StatusMessage; subject=$certificate.Subject; issuer=$certificate.Issuer; publisher=$certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false); certificateSha256=$digest; thumbprintSha1=$certificate.Thumbprint; fileSha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant() }
 }

@@ -42,7 +42,7 @@ f790fdc69416ab498774854f46ca179a2fb8fe6c4c44f8e7fcb7d7d7037e3200
 
 证书 SHA-1 定位指纹为 `54E4378450A3DB86C0D11E338FA30B0FD8C19A4B`；主体为 `C=CN / O=Brclio / CN=Brclio Pay`。SHA-1 只用于 Windows 证书定位，文件完整性使用 SHA-256。
 
-证书默认可能使 `Get-AuthenticodeSignature` 显示 `NotTrusted`。若决定信任，请先按本版说明核对证书和安装程序，再手动导入 `Cert:\CurrentUser\Root` 与 `Cert:\CurrentUser\TrustedPublisher`，并确认签名状态变为 `Valid`。导入代表当前用户信任这张证书签名的代码，不是仅对一个文件的临时例外；不使用 LocalMachine，也不自动导入。
+未信任根证书时，`Get-AuthenticodeSignature` 可能显示 `UnknownError`；只有原生 `WinVerifyTrust` 的 `0x800B0109` 可明确归类未信任根，其它 `UnknownError` 不能当正常，`NotTrusted` 也可能代表显式不信任。先核对固定 CER 和本版安装程序的 SHA-256，尚未通过时不运行安装程序。若依据已验签发布清单决定信任固定公钥，再按本版说明手动导入 `Cert:\CurrentUser\Root` 与 `Cert:\CurrentUser\TrustedPublisher`，并重新确认签名状态为 `Valid`；仍失败则停止并撤销信任。导入代表当前用户信任这张证书签名的代码，不是仅对一个文件的临时例外；不使用 LocalMachine，也不自动导入。
 
 导入自签证书不保证 SmartScreen 的信誉提示消失。客户端不关闭 Defender、SmartScreen 或修改组织策略。签名缺失、`HashMismatch`、证书或 SHA-256 不匹配时应停止安装；管理设备无法允许时可继续使用网页后台。参见 [Microsoft 签名说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_signing) 与 [Get-AuthenticodeSignature](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature?view=powershell-7.5)。
 
