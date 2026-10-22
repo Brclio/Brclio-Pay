@@ -23,14 +23,16 @@ function Invoke-IsolatedUserTrust {
   } finally { $process.Dispose() }
   $location = 'Cert:\CurrentUser\' + $Store + '\' + $expected.Identity.certificateThumbprintSha1
   $present = Test-Path -LiteralPath $location
-  if ($Operation -eq 'addstore') {
-    if (-not $present) { throw 'Expected public certificate was not added to the isolated CurrentUser store.' }
+  # The Cert: provider may cache the earlier logical view. Physical DER persistence is asserted
+  # by the child; actual native WinVerifyTrust before/after/removal determines trust, without flags.
+  if ($Operation -eq 'addstore' -and $present) {
     $stored = Get-Item -LiteralPath $location
     $digest = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($stored.RawData)).ToLowerInvariant()
     if ($digest -cne $expected.Identity.certificateSha256 -or $stored.HasPrivateKey) { throw 'Isolated CurrentUser trust entry does not match the fixed public certificate.' }
-  } elseif ($present) { throw 'Isolated CurrentUser certificate cleanup did not remove the fixed trust entry.' }
+  }
+  Write-VerificationProgress ('Cert provider logical visibility after ' + $Operation + ' ' + $Store + ': ' + $present)
   Write-VerificationProgress ('Completed bounded CurrentUser certificate operation: ' + $Operation + ' ' + $Store)
-  return [pscustomobject]@{ scope='CurrentUser'; provider='CERT_STORE_PROV_REG'; store=$Store; operation=$Operation; verified=$true; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
+  return [pscustomobject]@{ scope='CurrentUser'; provider='CERT_STORE_PROV_REG'; store=$Store; operation=$Operation; verified=$true; physicalStorePresenceVerified=$true; logicalStoreVisible=$present; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
 }
 
 $stores=@('Root','TrustedPublisher');$owned=[System.Collections.Generic.List[string]]::new();$operations=[System.Collections.Generic.List[object]]::new()
@@ -45,5 +47,6 @@ try {
  foreach($store in $owned){try{$operations.Add((Invoke-IsolatedUserTrust -Store $store -Operation delstore))}catch{$errors.Add($store)}}
  if($errors.Count){throw ('Probe cleanup failed: '+($errors -join ', '))}
 }
+$removed=Read-WindowsAuthenticodeEvidence -Path $Installer -Expected $expected -RequiredStatus UntrustedRoot
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-[ordered]@{schema=1;applicationSourceRevision='1d5c981361ace4fe49931ad40934043e180d3ad7';verifierRevision=$env:GITHUB_SHA;installerSha256='d8227773e0689af5b1416dbb92c11091065bdc8fc670ada4e3aa65de72cd7986';before=$before;after=$after;currentUserTrustRemoved=$true;operations=@($operations);providerDocumentation='https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore';unprotectedFlagUsed=$false;globalTrustModified=$false} | ConvertTo-Json -Depth 12 | Set-Content -Encoding utf8 (Join-Path $OutputDirectory 'windows-trust-probe.json')
+[ordered]@{schema=1;applicationSourceRevision='1d5c981361ace4fe49931ad40934043e180d3ad7';verifierRevision=$env:GITHUB_SHA;installerSha256='d8227773e0689af5b1416dbb92c11091065bdc8fc670ada4e3aa65de72cd7986';before=$before;after=$after;afterRemoval=$removed;currentUserTrustRemoved=$true;operations=@($operations);providerDocumentation='https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore';unprotectedFlagUsed=$false;globalTrustModified=$false} | ConvertTo-Json -Depth 12 | Set-Content -Encoding utf8 (Join-Path $OutputDirectory 'windows-trust-probe.json')

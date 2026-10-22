@@ -58,14 +58,16 @@ function Invoke-IsolatedUserTrust {
   } finally { $process.Dispose() }
   $location = 'Cert:\CurrentUser\' + $Store + '\' + $expected.Identity.certificateThumbprintSha1
   $present = Test-Path -LiteralPath $location
-  if ($Operation -eq 'addstore') {
-    if (-not $present) { throw 'Expected public certificate was not added to the isolated CurrentUser store.' }
+  # The Cert: provider may cache the earlier logical view. Physical DER persistence is asserted
+  # by the child; actual native WinVerifyTrust before/after/removal determines trust, without flags.
+  if ($Operation -eq 'addstore' -and $present) {
     $stored = Get-Item -LiteralPath $location
     $digest = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($stored.RawData)).ToLowerInvariant()
     if ($digest -cne $expected.Identity.certificateSha256 -or $stored.HasPrivateKey) { throw 'Isolated CurrentUser trust entry does not match the fixed public certificate.' }
-  } elseif ($present) { throw 'Isolated CurrentUser certificate cleanup did not remove the fixed trust entry.' }
+  }
+  Write-VerificationProgress ('Cert provider logical visibility after ' + $Operation + ' ' + $Store + ': ' + $present)
   Write-VerificationProgress ('Completed bounded CurrentUser certificate operation: ' + $Operation + ' ' + $Store)
-  return [pscustomobject]@{ scope='CurrentUser'; provider='CERT_STORE_PROV_REG'; store=$Store; operation=$Operation; verified=$true; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
+  return [pscustomobject]@{ scope='CurrentUser'; provider='CERT_STORE_PROV_REG'; store=$Store; operation=$Operation; verified=$true; physicalStorePresenceVerified=$true; logicalStoreVisible=$present; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
 }
 
 function Install-Package([string]$Path) {
@@ -154,11 +156,13 @@ try {
     try {
       # Attempt deletion even when the logical chain view does not expose the physical entry.
       $trustOperations.Add((Invoke-IsolatedUserTrust -Store (Split-Path -Leaf $store) -Operation 'delstore'))
-      if (Test-Path -LiteralPath (Join-Path $store $expected.Identity.certificateThumbprintSha1)) { throw 'An isolated CurrentUser trust addition remains after verification.' }
     } catch { $cleanupFailures.Add((Split-Path -Leaf $store)) }
   }
   if ($cleanupFailures.Count -gt 0) { throw ('Isolated CurrentUser trust cleanup failed: ' + ($cleanupFailures -join ', ')) }
 }
+$afterTrustRemoval = Read-WindowsAuthenticodeEvidence -Path $Installer -Expected $expected -RequiredStatus 'UntrustedRoot'
+$signingEvidence['afterTrustRemoval'] = $afterTrustRemoval
+$signingEvidence['trustRemovedNativeRejected'] = $true
 $signingEvidence['currentUserTrustRemovedAfterVerification'] = $true
 $signingEvidence['trustStoresAbsentBeforeVerification'] = $true
 $signingEvidence['trustProviderDocumentation'] = 'https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore'
