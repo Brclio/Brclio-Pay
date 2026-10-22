@@ -27,10 +27,28 @@
         <article class="download-row"><span class="download-index" aria-hidden="true">02</span><div class="download-platform"><h3>Windows</h3><p>Windows 10 / 11 · 64 位</p></div><div class="download-options"><div><a class="button button-primary download-link" data-platform="win32-x64" aria-disabled="true">下载安装程序 · 等待发布</a><small>适用于 Intel / AMD 64 位电脑</small></div></div></article>
         <article class="download-row"><span class="download-index" aria-hidden="true">03</span><div class="download-platform"><h3>Android</h3><p>Android 8 或更高版本</p></div><div class="download-options"><div><a class="button button-primary download-link" data-platform="android-universal" aria-disabled="true">下载 APK · 等待发布</a><small>通用安装包 · 由系统确认安装权限</small></div></div></article>
       </div>
-      <p class="download-source">安装包托管于 GitHub Releases。此页面会先验证发布签名，再显示对应版本的下载链接。</p>
+      <p class="download-source">安装包托管于 GitHub Releases。此页面会先验证发布签名，再显示对应版本的下载链接。<a class="text-link" href="#installation">查看首次安装步骤 ↓</a></p>
       <details class="release-details" id="releaseDetails" hidden><summary>本次更新内容与文件校验</summary><p id="releaseNotes"></p><div id="releaseHashes" class="release-hashes"></div><a id="releaseLink" class="text-link" rel="noreferrer">在 GitHub 查看完整发布 ↗</a></details>
     </div></section>
-    <section class="client-update-section" aria-labelledby="client-update-title"><div class="container client-update-layout"><div><p class="label-caps">KEEP YOUR DESK UP TO DATE</p><h2 id="client-update-title">更新有提示，<br>安装由你决定。</h2></div><div><p>客户端提供在线版本检查。发现新版本后，核验发布签名与安装包摘要，再由你确认更新。管理员凭据始终由现有支付中心校验。</p><p class="client-install-note">首次安装时，macOS 或 Windows 可能提示无法验证开发者；请核对下载来源与文件摘要。安卓首次安装 APK 需要允许对应来源安装应用。</p><a class="text-link" href="/admin">也可以直接使用网页版 ↗</a></div></div></section>
+    <section id="installation" class="installation-section container" aria-labelledby="installation-title">
+      <div class="installation-heading"><p class="label-caps">FIRST OPEN, STEP BY STEP</p><h2 id="installation-title">第一次打开，<br>照着这几步来。</h2><p>1.0.1 起提供 Mac 安装助手与 Windows 公钥证书。系统的安装确认仍由你决定。</p></div>
+      <div class="installation-flow">
+        <details class="installation-platform" open><summary><span>01</span><strong>Mac · 使用 DMG 内的安装助手</strong></summary><div class="installation-content">
+          <ol class="installation-steps"><li>下载与你的芯片对应的 DMG，双击打开，再打开其中的 <strong>安装 Brclio Pay.command</strong>。</li><li>若系统拦截助手，打开“终端”，输入 <code>/bin/bash</code> 和一个空格，将这个 <code>.command</code> 文件拖入终端，按回车。</li><li>助手会核验应用签名、逐文件摘要和架构，显示安装范围；阅读后按提示输入确认短语。应用安装到当前用户的 <code>~/Applications/Brclio Pay.app</code>。退出旧客户端后，从这个新路径打开。</li></ol>
+          <p class="installation-note">此版本没有 Apple Developer ID 签名，也未通过 Apple 公证。助手只为已验证的应用副本移除下载隔离标记，不需要 sudo，也不关闭全局 Gatekeeper。仍有系统提示时，可在“系统设置 → 隐私与安全性”中核对应用后选择“仍要打开”；受组织策略管理的设备可能无法允许。</p>
+          <a class="text-link" href="https://support.apple.com/102445" rel="noreferrer">Apple 的首次打开说明 ↗</a>
+        </div></details>
+        <details class="installation-platform"><summary><span>02</span><strong>Windows · 核验签名与当前用户信任</strong></summary><div class="installation-content">
+          <p id="installationState" class="installation-status" role="status" aria-live="polite">先核验本版发布信息，再显示证书下载。</p>
+          <div class="installation-links"><a id="windowsCertificate" class="button button-secondary" aria-disabled="true">下载公钥证书 .cer</a><a id="windowsSigningGuide" class="text-link" aria-disabled="true">下载签名与安装说明 ↗</a></div>
+          <div id="windowsSigningIdentity" class="signing-identity"></div>
+          <ol class="installation-steps"><li>先核对安装程序和公钥证书的 SHA-256，再按本版说明查看 Authenticode 签名。</li><li>如你决定信任 Brclio Pay 自签证书，按说明将它导入<strong>当前用户</strong>的受信任根与受信任发布者，然后确认安装程序签名显示 <code>Valid</code>。</li><li>打开安装程序，按系统提示确认。安装说明也包含撤销这张证书信任的方法。</li></ol>
+          <p class="installation-note">自签名不代表公共证书机构或 Microsoft 已验证发布者身份，系统默认不会自动信任。导入后 SmartScreen 仍可能提示；客户端不会关闭 Defender 或修改组织策略。公钥证书不包含私钥。</p>
+        </div></details>
+        <details class="installation-platform"><summary><span>03</span><strong>Android · 由系统确认安装与更新</strong></summary><div class="installation-content"><p>下载 APK 后，根据 Android 提示为当前下载来源允许安装。后续可在客户端点击“检查更新”；下载完成会核验文件摘要、应用身份、版本和同一签名证书，再交给系统安装器由你确认。</p></div></details>
+      </div>
+    </section>
+    <section class="client-update-section" aria-labelledby="client-update-title"><div class="container client-update-layout"><div><p class="label-caps">KEEP YOUR DESK UP TO DATE</p><h2 id="client-update-title">更新有提示，<br>安装由你决定。</h2></div><div><p>客户端提供在线版本检查。发现新版本后，核验发布签名与安装包摘要，再由你确认更新。管理员凭据始终由现有支付中心校验。</p><p class="client-install-note">设备受安装策略限制时，可以继续使用同一个网页后台。客户端更新清单验签与系统代码签名信任各自独立核验。</p><a class="text-link" href="/admin">直接使用网页版 ↗</a></div></div></section>
   </main>
   <footer class="site-footer container"><div><a class="wordmark wordmark-small" href="/"><span>Brclio</span><span class="wordmark-pay">Pay</span></a><p>产品之间，支付相连。</p></div><div class="footer-meta"><span>© Brclio</span><a href="https://bornforthis.cn" rel="noreferrer">bornforthis.cn ↗</a><span class="design-credit">Design · Brclio Design System</span></div></footer>
   <!-- © Brclio · Brclio/brclio-design-system · CC BY-NC-SA 4.0 -->

@@ -122,14 +122,14 @@ async function createWindow(){
   route('client:update-check',async()=>updater.check());
   route('client:update-download',async()=>{
     if(updater.state.phase!=='available')return;
-    const {response}=await dialog.showMessageBox(window,{type:'info',title:'下载新版本',message:`下载 Brclio Pay ${updater.manifest.version}？`,detail:updater.manifest.notes+(process.platform==='darwin'?'\n\n当前 Mac 安装包未经 Apple 公证，首次打开可能出现系统信任提示。':''),buttons:['下载更新','取消'],defaultId:1,cancelId:1,noLink:true});
+    const {response}=await dialog.showMessageBox(window,{type:'info',title:'下载新版本',message:`下载 Brclio Pay ${updater.manifest.version}？`,detail:updater.manifest.notes+(process.platform==='darwin'?'\n\n当前 Mac 安装包使用 Brclio 自签证书，未经 Apple 公证。首次安装请使用 DMG 内安装助手并明确确认；系统信任步骤不会自动跳过。':''),buttons:['下载更新','取消'],defaultId:1,cancelId:1,noLink:true});
     if(response===0)void updater.download();
   });
   route('client:installer-download',async()=>{if(updater.state.phase==='manual')void updater.download(true);});
   route('client:update-install',async()=>{
     if(updater.state.phase!=='ready')return;
     const dmg=updater.downloaded?.type==='dmg';
-    const {response}=await dialog.showMessageBox(window,{type:'question',title:'安装已核验更新',message:dmg?'打开 DMG 安装包？':'保存当前操作并退出，安装新版本？',detail:dmg?'将打开已核验的安装映像。拖入“应用程序”完成替换。':'请先保存后台编辑。客户端将退出；安装后重新打开。',buttons:[dmg?'打开 DMG':'退出并安装','取消'],defaultId:1,cancelId:1,noLink:true});
+    const {response}=await dialog.showMessageBox(window,{type:'question',title:'安装已核验更新',message:dmg?'打开 DMG 安装包？':'保存当前操作并退出，安装新版本？',detail:dmg?'将打开已核验的 DMG。请运行其中“安装 Brclio Pay.command”，核验后明确确认安装到当前用户 Applications。':'请先保存后台编辑。客户端将退出；安装后重新打开。',buttons:[dmg?'打开 DMG':'退出并安装','取消'],defaultId:1,cancelId:1,noLink:true});
     if(response===0){try{if(dmg){await updater.verifyDownloaded();const error=await shell.openPath(updater.downloaded.path);if(error)throw Error('无法打开安装映像');}else await updater.install();}catch(e){updater.set({phase:'error',message:e.message});}}
   });
   await window.loadFile(SHELL);await confirmStartup();

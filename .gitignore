@@ -20,6 +20,7 @@ clients/android/local.properties
 clients/desktop/dist/
 clients/ci-results/
 *.p12
+*.pfx
 *.jks
 *.keystore
 public/docs/

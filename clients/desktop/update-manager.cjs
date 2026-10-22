@@ -156,9 +156,9 @@ class UpdateManager {
         try {
           this.prepared=await stageMac(target,path.resolve(process.resourcesPath,'../..'),this.settings,this.manifest.version,this.arch,work);
           return this.set({phase:'ready',message:'签名与安装包已核验。退出后替换应用并重新打开。',progress:100});
-        }catch(e){ this.prepared=null; return this.set({phase:'manual',message:`自动替换不可用：${e.message}。可下载已核验 DMG 手动安装。`,progress:100}); }
+        }catch(e){ this.prepared=null; return this.set({phase:'manual',message:`自动替换不可用：${e.message}。可下载已核验 DMG，并运行其中的“安装 Brclio Pay.command”安装助手。`,progress:100}); }
       }
-      return this.set({phase:'ready',message:file.type==='dmg'?'DMG 已核验，可打开后拖入“应用程序”安装。':'安装包已核验。确认后退出并打开安装程序。',progress:100});
+      return this.set({phase:'ready',message:file.type==='dmg'?'DMG 已核验，请打开并运行其中的安装助手，按提示核验和明确确认。':'安装包已核验。确认后退出并打开安装程序。',progress:100});
     }catch(e){ return this.set({phase:'error',message:`更新下载失败：${e.message}`}); }finally{this.busy=false;}
   }
   async verifyDownloaded() {

@@ -4,7 +4,7 @@
 .client-hero h1 { font-family: "Noto Serif SC", "Songti SC", SimSun, serif; font-size: clamp(3.2rem,6.8vw,6rem); line-height: 1.18; letter-spacing: -.045em; margin: 20px 0 28px; }
 .client-description { color: #4a4a5a; max-width: 31em; font-size: clamp(1rem,1.6vw,1.15rem); line-height: 1.9; margin-bottom: 30px; }
 .client-hero-note { color: #626270; font-size: .8rem; margin-top: 14px; }
-.client-desk { position: relative; background: #faf6eb; border: 1px solid #ded7c6; transform: rotate(2deg); padding: clamp(22px,3vw,38px); }
+.client-desk { position: relative; background: #faf6eb; border: 1px solid #ded7c6; padding: clamp(22px,3vw,38px); }
 .desk-caption { position: absolute; top: -35px; right: 12px; font: italic 1.1rem Georgia,serif; color: #2b7fd8; }
 .desk-title { display: flex; align-items: center; gap: 18px; border-bottom: 1px solid #d8d0bd; padding-bottom: 26px; color: #1e5ba8; font-size: 1.2rem; font-weight: 700; }
 .desk-title > :last-child { margin-left: auto; }
@@ -39,6 +39,33 @@
 .release-hashes p { color: #626270; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.8; }
 .release-hashes strong { color: #1a1a2e; font-weight: 600; }
 .release-hashes code { display: block; font-size: .72rem; }
+.installation-section { display: grid; grid-template-columns: .7fr 1.3fr; gap: clamp(35px,6vw,90px); padding-block: clamp(72px,10vh,130px); scroll-margin-top: 25px; }
+.installation-heading h2 { font-family: "Noto Serif SC", "Songti SC", SimSun,serif; font-size: clamp(1.8rem,3.6vw,3rem); line-height: 1.4; margin-block: 14px 22px; }
+.installation-heading > p:last-child { font-size: .9rem; line-height: 1.9; color: #626270; max-width: 24em; }
+.installation-flow { min-width: 0; border-top: 1px solid #d4cebf; }
+.installation-platform { border-bottom: 1px solid #d4cebf; padding-block: 24px; }
+.installation-platform > summary { display: flex; align-items: baseline; gap: 18px; cursor: pointer; list-style: none; line-height: 1.65; }
+.installation-platform > summary::-webkit-details-marker { display: none; }
+.installation-platform > summary > span { font: italic 1.2rem Georgia,serif; color: var(--blue); }
+.installation-platform > summary strong { font-size: 1.05rem; font-weight: 600; flex: 1; }
+.installation-platform > summary::after { content: "+"; color: var(--blue); font-size: 1.2rem; }
+.installation-platform[open] > summary::after { content: "−"; }
+.installation-content { padding-top: 22px; font-size: .88rem; line-height: 1.9; color: #4a4a5a; overflow-wrap: anywhere; }
+.installation-content > p { margin-bottom: 18px; }
+.installation-content .text-link,.download-source .text-link { color: #1e5ba8; }
+.installation-steps { list-style: none; counter-reset: installation-step; margin: 0 0 22px; padding: 0; display: grid; gap: 16px; }
+.installation-steps li { counter-increment: installation-step; position: relative; padding-left: 34px; }
+.installation-steps li::before { content: counter(installation-step); position: absolute; left: 0; top: 2px; width: 23px; height: 23px; border-radius: 50%; background: #f4d758; color: #1a1a2e; font: 600 .75rem/23px system-ui,sans-serif; text-align: center; }
+.installation-note { background: #faf6eb; padding: 18px 20px; font-size: .8rem; }
+.installation-links { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-block: 18px; }
+.installation-links .button { font-size: .8rem; padding: 10px 14px; }
+.installation-links [aria-disabled="true"] { opacity: .58; cursor: not-allowed; }
+.installation-status { font-size: .8rem; color: #626270; }
+.signing-identity { display: grid; gap: 12px; margin-bottom: 24px; }
+.signing-identity p { font-size: .72rem; line-height: 1.8; }
+.signing-identity strong { display: block; font-weight: 600; }
+.signing-identity code { overflow-wrap: anywhere; }
+.copy-fingerprint { border: 0; background: transparent; color: var(--blue); text-decoration: underline; font: inherit; cursor: pointer; padding: 4px 0 4px 12px; }
 .client-update-section { background: #151821; color: #f6f0df; padding-block: clamp(66px,10vh,120px); }
 .client-update-layout { display: grid; grid-template-columns: 1fr 1.05fr; gap: clamp(40px,7vw,100px); align-items: start; }
 .client-update-section .label-caps { color: #f4d758; }
@@ -47,6 +74,6 @@
 .client-update-layout p:not(.label-caps) { color: #d2d1cd; line-height: 1.9; font-size: 1rem; margin-bottom: 22px; }
 .client-update-layout .client-install-note { color: #b5b6ba!important; font-size: .82rem!important; }
 .client-update-section .text-link { color: #f4d758; }
-@media(max-width:900px) { .client-hero { grid-template-columns: 1fr; min-height: auto; gap: 72px; }.client-desk { max-width: 540px; margin-inline: auto; width: 100%; }.download-row { grid-template-columns: 35px 1fr; }.download-options { grid-column: 2; }.downloads-heading { align-items: start; flex-direction: column; }.release-state { text-align: left; max-width: none; }.client-update-layout { grid-template-columns: 1fr; } }
-@media(max-width:600px) { .client-hero h1 { font-size: clamp(3rem,12vw,4rem); }.client-desk { transform: rotate(1deg); }.download-row { gap: 14px; }.download-options { flex-direction: column; }.download-options > div { min-width: 0; }.client-update-section h2 { font-size: 2rem; }.download-link { white-space: normal; } }
+@media(max-width:900px) { .client-hero { grid-template-columns: 1fr; min-height: auto; gap: 72px; }.client-desk { max-width: 540px; margin-inline: auto; width: 100%; }.download-row { grid-template-columns: 35px 1fr; }.download-options { grid-column: 2; }.downloads-heading { align-items: start; flex-direction: column; }.release-state { text-align: left; max-width: none; }.client-update-layout { grid-template-columns: 1fr; }.installation-section { grid-template-columns: 1fr; } }
+@media(max-width:600px) { .client-hero h1 { font-size: clamp(3rem,12vw,4rem); }.download-row { gap: 14px; }.download-options { flex-direction: column; }.download-options > div { min-width: 0; }.client-update-section h2 { font-size: 2rem; }.download-link { white-space: normal; }.installation-platform > summary { gap: 12px; } }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior: auto!important; transition: none!important; } }

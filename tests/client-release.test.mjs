@@ -4,7 +4,7 @@ import {generateKeyPairSync,sign} from 'node:crypto';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
-import {assetDefinitions,assetUrl,releaseUrl,versionCode,validateManifest,verifyEnvelope,signManifest,inspectAssets,compareVersions,auditSource} from '../clients/scripts/release-manifest.mjs';
+import {assetDefinitions,assetUrl,releaseUrl,versionCode,validateManifest,verifyEnvelope,signManifest,inspectAssets,compareVersions,auditSource,INSTALLATION_ASSETS,requiredNativeChecks,validateSigningIdentity,validateInstallationManifest,signInstallationManifest,verifyInstallationEnvelope,stageInstallationAssets} from '../clients/scripts/release-manifest.mjs';
 const settings={productName:'Brclio Pay',applicationId:'cn.bornforthis.brcliopay',version:'1.0.0',repository:'Brclio/Brclio-Pay',releaseTagPrefix:'client-v'};
 const keys=generateKeyPairSync('rsa',{modulusLength:3072,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}});
 const options={now:Date.parse('2026-10-22T12:00:00.000Z')};
@@ -24,3 +24,63 @@ test('source audit accepts documentation PEM placeholder and rejects actual priv
 test('archive audit rejects forbidden entries and scans decompressed credential material',async()=>{const directory=await mkdtemp(resolve(tmpdir(),'brclio-archive-'));const {mkdir}=await import('node:fs/promises');const {spawnSync}=await import('node:child_process');const {auditAssetCredentials}=await import('../clients/scripts/release-manifest.mjs');try{await mkdir(resolve(directory,'secrets'));const sensitive='fixture-credential-material-123456789';await writeFile(resolve(directory,'secrets/runtime-vars.json'),JSON.stringify({PRODUCT_SECRET:sensitive}));await writeFile(resolve(directory,'payload.txt'),sensitive);const zip=spawnSync('zip',['-q','-9','asset.zip','payload.txt'],{cwd:directory,encoding:'utf8'});assert.equal(zip.status,0,zip.stderr);spawnSync('zip',['-q','Brclio-Pay-1.0.0-mac-arm64.zip','secrets/runtime-vars.json'],{cwd:directory});await assert.rejects(inspectAssets(directory,settings),/Forbidden archive entry/);await assert.rejects(auditAssetCredentials(directory,{'asset.zip':{}},directory),/credential/);await writeFile(resolve(directory,'payload.txt'),'safe public app contents');spawnSync('zip',['-q','-9','asset.zip','payload.txt'],{cwd:directory});assert.equal((await auditAssetCredentials(directory,{'asset.zip':{}},directory)).scope,'tracked-source,raw-installers,expanded-zip-and-apk');}finally{await rm(directory,{recursive:true,force:true});}});
 test('public metadata is gated on complete already-published exact GitHub asset digests',async()=>{const {verifyPublishedRelease}=await import('../clients/scripts/release-manifest.mjs');const {createHash}=await import('node:crypto');const value=manifest(),assets={};for(const platform of Object.values(value.platforms))for(const asset of Object.values(platform))assets[asset.name]={bytes:asset.bytes,sha256:asset.sha256};const metadata={'client-update.json':JSON.stringify(unsignedEnvelope(value)),SHA256SUMS:'checksums','release-audit.json':'audit'};const release={draft:false,tag_name:'client-v1.0.0',assets:[...Object.entries(assets).map(([name,a])=>({name,size:a.bytes,digest:`sha256:${a.sha256}`})),...Object.entries(metadata).map(([name,text])=>({name,size:Buffer.byteLength(text),digest:`sha256:${createHash('sha256').update(text).digest('hex')}`}))]};assert.equal(verifyPublishedRelease(release,settings,assets,metadata),true);for(const alter of [r=>r.draft=true,r=>r.assets.pop(),r=>r.assets[0].digest='sha256:'+'b'.repeat(64),r=>r.assets.push({name:'backup.json',size:1,digest:'sha256:'+'a'.repeat(64)})]){const changed=clone(release);alter(changed);assert.throws(()=>verifyPublishedRelease(changed,settings,assets,metadata));}assert.throws(()=>verifyPublishedRelease(release,settings,assets,{...metadata,'client-update.json':metadata['client-update.json']+'\n'}),/integrity/);});
 test('native evidence requires all six exact artifacts and actual platform-specific verification scopes',async()=>{const {NATIVE_CHECKS,validateNativeEvidence}=await import('../clients/scripts/release-manifest.mjs');const source='1'.repeat(40),assets={};for(const files of Object.values(manifest().platforms))for(const asset of Object.values(files))assets[asset.name]={bytes:asset.bytes,sha256:asset.sha256};const evidence={schema:1,product:'Brclio Pay',version:'1.0.0',sourceRevision:source,artifacts:Object.fromEntries(Object.entries(assets).map(([name,a])=>[name,{...a,sourceRevision:source}])),checks:Object.entries(NATIVE_CHECKS).map(([id,def])=>({id,environment:def.environments[0],scope:def.scope,sourceRevision:source,verifiedAt:'2026-10-22T01:00:00.000Z',evidenceSha256:'c'.repeat(64),passed:true,details:Object.fromEntries(def.details.map(name=>[name,true]))}))};const result=validateNativeEvidence(evidence,settings,assets,source,options);assert.equal(result.verified,true);assert.equal(result.checks.length,5);assert.equal(result.checks[1].environment,'macos-arm64-rosetta');for(const alter of [e=>e.sourceRevision='2'.repeat(40),e=>Object.values(e.artifacts)[0].sourceRevision='2'.repeat(40),e=>Object.values(e.artifacts)[0].bytes++,e=>Object.values(e.artifacts)[0].sha256='b'.repeat(64),e=>delete e.artifacts[Object.keys(e.artifacts)[0]],e=>e.checks.pop(),e=>e.checks[4].environment='cross-compile-on-macos',e=>e.checks[2].scope='formal-app-complete-upgrade',e=>e.checks[3].details.upgradeVerified=false,e=>e.checks[0].evidenceSha256='invalid',e=>e.checks[0].path='/Users/private/report.json']){const changed=clone(evidence);alter(changed);assert.throws(()=>validateNativeEvidence(changed,settings,assets,source,options));}});
+
+function installation(version='1.0.1') {
+  const windows={schema:1,publisher:'Brclio Pay',subject:'C=CN\nO=Brclio\nCN=Brclio Pay',certificateAssetName:INSTALLATION_ASSETS.certificate.name,certificateSha256:'b'.repeat(64),certificateThumbprintSha1:'A'.repeat(40),notBefore:'2026-10-22T00:00:00.000Z',notAfter:'2036-10-19T00:00:00.000Z',selfSigned:true,keyAlgorithm:'RSA',keyBits:3072,usage:'codeSigning'};
+  return {schema:1,product:'Brclio Pay',applicationId:settings.applicationId,version,releaseUrl:releaseUrl(settings,version),windows,assets:Object.fromEntries(Object.entries(INSTALLATION_ASSETS).map(([purpose,asset])=>[purpose,{...asset,url:assetUrl(settings,version,asset.name),bytes:1234,sha256:purpose==='certificate'?windows.certificateSha256:'c'.repeat(64)}]))};
+}
+test('installation sidecar has a separate signed schema and preserves the old update manifest',async()=>{
+  const v101={...settings,version:'1.0.1'},support=installation(),opts={expectedVersion:'1.0.1'};
+  const envelope=signInstallationManifest(support,keys.privateKey,keys.publicKey,v101,opts);
+  assert.deepEqual(verifyInstallationEnvelope(envelope,keys.publicKey,v101,opts),support);
+  assert.throws(()=>verifyEnvelope(envelope,keys.publicKey,v101),/manifest shape/);
+  assert.deepEqual(verifyEnvelope(unsignedEnvelope(manifest('1.0.1')),keys.publicKey,v101,options),manifest('1.0.1'));
+  const {verifyBrowserInstallationEnvelope}=await import('../public/clients.js');const {webcrypto}=await import('node:crypto');
+  assert.deepEqual(await verifyBrowserInstallationEnvelope(envelope,{publicKey:keys.publicKey,cryptoApi:webcrypto,...opts}),support);
+  for(const alter of [v=>v.version='1.0.2',v=>v.assets.certificate.sha256='d'.repeat(64),v=>v.assets.guide.url='https://evil.invalid/instructions.md',v=>v.assets.certificate.bytes=1024*1024+1,v=>v.windows.selfSigned=false,v=>v.windows.keyBits=1024,v=>v.windows.subject='CN=Brclio\u0000bad',v=>v.assets.extra={}]) {
+    const value=clone(support);alter(value);const changed=unsignedEnvelope(value);
+    assert.throws(()=>verifyInstallationEnvelope(changed,keys.publicKey,v101,opts));
+    await assert.rejects(verifyBrowserInstallationEnvelope(changed,{publicKey:keys.publicKey,cryptoApi:webcrypto,...opts}));
+  }
+  await assert.rejects(verifyBrowserInstallationEnvelope({...envelope,signature:Buffer.alloc(384).toString('base64')},{publicKey:keys.publicKey,cryptoApi:webcrypto,...opts}),/签名/);
+});
+test('installation support is generated only from the tracked public certificate identity and reviewed guide',async()=>{
+  const directory=await mkdtemp(resolve(tmpdir(),'brclio-install-support-'));const {readFile}=await import('node:fs/promises');
+  try {
+    const staged=await stageInstallationAssets({directory,settings:{...settings,version:'1.0.1'},write:true});
+    assert.equal(validateSigningIdentity(staged.identity).selfSigned,true);
+    assert.equal(Object.keys(staged.contents).length,2);
+    const guide=await readFile(resolve(directory,INSTALLATION_ASSETS.guide.name),'utf8');
+    assert.ok(guide.includes(staged.identity.certificateSha256));assert.ok(guide.includes(staged.identity.certificateThumbprintSha1));assert.ok(guide.includes('Cert:\\CurrentUser\\Root'));assert.ok(!guide.includes('@@'));
+    await stageInstallationAssets({directory,settings:{...settings,version:'1.0.1'},write:false});
+    await writeFile(resolve(directory,INSTALLATION_ASSETS.guide.name),'Changed instructions');
+    await assert.rejects(stageInstallationAssets({directory,settings:{...settings,version:'1.0.1'},write:false}),/differs/);
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
+test('1.0.1 release requires exactly twelve assets and seven native scopes without weakening existing checks',async()=>{
+  const {validateNativeEvidence,verifyPublishedRelease}=await import('../clients/scripts/release-manifest.mjs');const {createHash}=await import('node:crypto');
+  const v101={...settings,version:'1.0.1'},assets={};for(const files of Object.values(manifest('1.0.1').platforms))for(const a of Object.values(files))assets[a.name]={bytes:a.bytes,sha256:a.sha256};
+  for(const a of Object.values(installation().assets))assets[a.name]={bytes:a.bytes,sha256:a.sha256};
+  const source='1'.repeat(40),definitions=requiredNativeChecks(v101),evidence={schema:1,product:'Brclio Pay',version:'1.0.1',sourceRevision:source,artifacts:Object.fromEntries(Object.entries(assets).map(([name,a])=>[name,{...a,sourceRevision:source}])),checks:Object.entries(definitions).map(([id,d])=>({id,environment:d.environments[0],scope:d.scope,sourceRevision:source,verifiedAt:'2026-10-22T01:00:00.000Z',evidenceSha256:'c'.repeat(64),passed:true,details:Object.fromEntries(d.details.map(k=>[k,true]))}))};
+  assert.equal(validateNativeEvidence(evidence,v101,assets,source,options).checks.length,7);
+  for(const change of [e=>e.checks.pop(),e=>e.checks[6].details.beforeTrustRejected=false,e=>delete e.artifacts[INSTALLATION_ASSETS.certificate.name],e=>e.artifacts[INSTALLATION_ASSETS.guide.name].sha256='d'.repeat(64)]){const bad=clone(evidence);change(bad);assert.throws(()=>validateNativeEvidence(bad,v101,assets,source,options));}
+  const metadata={'client-update.json':'manifest',SHA256SUMS:'checksums','release-audit.json':'audit','client-installation.json':'installation'};
+  const release={draft:false,prerelease:false,tag_name:'client-v1.0.1',assets:[...Object.entries(assets).map(([name,a])=>({name,size:a.bytes,digest:'sha256:'+a.sha256})),...Object.entries(metadata).map(([name,text])=>({name,size:Buffer.byteLength(text),digest:'sha256:'+createHash('sha256').update(text).digest('hex')}))]};
+  assert.equal(release.assets.length,12);assert.equal(verifyPublishedRelease(release,v101,assets,metadata),true);
+  const missing={...metadata};delete missing['client-installation.json'];assert.throws(()=>verifyPublishedRelease(release,v101,assets,missing),/asset set/);
+  assert.throws(()=>verifyPublishedRelease({...release,prerelease:true},v101,assets,metadata),/published/);
+  assert.throws(()=>verifyPublishedRelease(release,v101,assets,{...metadata,'extra.md':'extra'}),/asset set/);
+});
+test('binary signing stores cannot enter tracked source or installer archives',async()=>{
+  const {spawnSync}=await import('node:child_process');
+  for(const extension of ['pfx','p12','jks','keystore']) {
+    const directory=await mkdtemp(resolve(tmpdir(),'brclio-key-store-'));
+    try {
+      const git=args=>{const r=spawnSync('git',args,{cwd:directory,encoding:'utf8'});assert.equal(r.status,0,r.stderr);};
+      git(['init','-q']);await writeFile(resolve(directory,'release.'+extension),Buffer.from([0x30,0x82,0,1,2,3]));git(['add','.']);git(['-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','binary keystore fixture']);
+      await assert.rejects(auditSource(directory),/Forbidden tracked/);
+      const zipped=spawnSync('zip',['-q','Brclio-Pay-1.0.0-mac-arm64.zip','release.'+extension],{cwd:directory,encoding:'utf8'});assert.equal(zipped.status,0,zipped.stderr);
+      await assert.rejects(inspectAssets(directory,settings),/Forbidden archive/);
+    } finally {await rm(directory,{recursive:true,force:true});}
+  }
+});

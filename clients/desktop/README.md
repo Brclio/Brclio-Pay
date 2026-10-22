@@ -14,7 +14,17 @@ npm run build:mac:x64 --prefix clients/desktop
 npm run build:win --prefix clients/desktop
 ```
 
-产物位于根目录 `dist-clients/`。Mac 为 DMG 和 ZIP；Windows 为 x64 NSIS 用户级安装程序。Mac 使用 ad-hoc 签名，尚无 Apple Developer ID 或公证；首次运行可能受到 Gatekeeper 阻止。Windows 未使用商业 Authenticode 证书，系统可能显示未知发布者。SHA-256 与应用更新描述的 RSA 签名用于核验发布内容，不替代操作系统的发布者认证。
+产物位于根目录 `dist-clients/`。Mac 为 DMG 和 ZIP；Windows 为 x64 NSIS 用户级安装程序。两个平台使用各自的长期自签代码证书；自签证书不会自动成为操作系统信任的发布者。Mac 没有 Apple Developer ID 或 Apple 公证，Windows 可能显示 SmartScreen 提示。SHA-256 与应用更新描述的 RSA 签名用于核验发布内容，不替代系统的发布者认证。
+
+Mac 构建由 `mac/build.cjs` 调用 Electron Builder，再用 `secrets/mac-code-signing/` 中独立钥匙串的长期证书签名。首次构建创建密钥，此后必须保留；构建不会将证书加入系统信任。安装包只包含公开证书和核验材料，私钥、钥匙串及口令不进入源码或安装包。
+
+## Mac 首次安装
+
+从官方 GitHub Release 下载与芯片对应的 DMG，打开其中的 `安装说明.txt`。退出所有 Brclio Pay 窗口后，运行 `安装 Brclio Pay.command`；如系统阻止直接打开脚本，可在终端输入 `/bin/bash `，将该脚本拖入终端，再回车。助手展示来源核验结果、证书指纹、安装路径以及未经过 Apple 公证的事实，只有输入完整的版本确认短语才开始安装。请先确认官方来源和发布资产 SHA-256。
+
+助手核对固定应用标识、版本、架构、代码签名证书、RSA 签名清单和逐文件摘要，在当前用户的 `~/Applications/Brclio Pay.app` 暂存并再次核验副本。确认后只删除该核验副本自身的 `com.apple.quarantine`，不关闭 Gatekeeper、不添加根证书、不使用 `sudo`。已有目标只在身份、签名和属主均符合时替换，并保留回退副本；其它位置的旧应用不变。安装完成后请打开助手显示的确切新路径，避免继续启动 `/Applications` 中的旧版。现有登录配置保留。
+
+这是用户对这个应用的一次明确放行，不是 Apple 的安全背书。若系统仍拦截，按 [Apple 的逐应用“仍要打开”说明](https://support.apple.com/en-us/102445) 操作；受组织设备策略管理的 Mac 可能不能放行。ZIP 用于应用内更新，首次安装推荐 DMG。
 
 ## 更新
 

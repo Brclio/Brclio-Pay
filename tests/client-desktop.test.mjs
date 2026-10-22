@@ -75,7 +75,7 @@ test('bundle digest detects changed bytes and symlink targets',async()=>{
 });
 test('desktop package includes only app source and public update trust resources',async()=>{
   const pkg=JSON.parse(await fs.readFile(new URL('../clients/desktop/package.json',import.meta.url),'utf8'));
-  assert.equal(pkg.build.appId,settings.applicationId);assert.equal(pkg.build.win.signAndEditExecutable,false);assert.equal(pkg.build.mac.identity,'-');
+  assert.equal(pkg.build.appId,settings.applicationId);assert.equal(pkg.build.win.signAndEditExecutable,true);assert.equal(pkg.build.win.forceCodeSigning,true);assert.equal(pkg.build.mac.identity,'-');
   assert.deepEqual(pkg.build.extraResources[0].filter,['release-settings.json','update-public-key.pem']);
   assert(!pkg.build.files.some(f=>/secrets|\.env|private-key/i.test(f)));
 });
@@ -102,4 +102,17 @@ test('failed Mac validation reopens only the untouched original verified app',as
   assert.deepEqual(commands,['/usr/bin/plutil','/usr/bin/codesign','/usr/bin/open']);assert(states.includes('validation-failed-original-reopened'));
   commands.length=0;
   assert.equal(await recoverUntouched(c,async()=>{},{readInode:async()=> 'changed:inode',execute}),false);assert.deepEqual(commands,[]);
+});
+test('Mac installer manifest seals regular bytes, permissions and internal links',async()=>{
+ const {makeManifest}=require('../clients/desktop/mac/after-sign.cjs'),dir=await fs.mkdtemp(path.join(os.tmpdir(),'brclio-mac-install-manifest-'));
+ try{await fs.mkdir(path.join(dir,'Contents'));await fs.writeFile(path.join(dir,'Contents','payload'),'version-one',{mode:0o644});await fs.symlink('Contents',path.join(dir,'linked'),'dir');
+  const before=await makeManifest(dir);assert.match(before,/F\t[0-7]+\t[a-f0-9]{64}\tContents\/payload/);assert.match(before,/L\t[0-7]+\t[a-f0-9]{64}\tlinked/);
+  await fs.writeFile(path.join(dir,'Contents','payload'),'version-two');assert.notEqual(await makeManifest(dir),before);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+test('Mac installer manifest refuses outward links and hard-linked content',async()=>{
+ const {makeManifest}=require('../clients/desktop/mac/after-sign.cjs'),dir=await fs.mkdtemp(path.join(os.tmpdir(),'brclio-mac-install-paths-'));
+ try{await fs.symlink('../outside',path.join(dir,'escape'));await assert.rejects(makeManifest(dir),/Unsafe application symlink/);await fs.unlink(path.join(dir,'escape'));
+  await fs.writeFile(path.join(dir,'one'),'test');await fs.link(path.join(dir,'one'),path.join(dir,'two'));await assert.rejects(makeManifest(dir),/hard-linked/);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
 });

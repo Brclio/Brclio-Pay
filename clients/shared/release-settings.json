@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "productName": "Brclio Pay",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "applicationId": "cn.bornforthis.brcliopay",
   "repository": "Brclio/Brclio-Pay",
   "releaseTagPrefix": "client-v",

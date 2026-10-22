@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "publisher": "Brclio Pay",
+  "subject": "C=CN\nO=Brclio\nCN=Brclio Pay",
+  "certificateAssetName": "Brclio-Pay-Windows-Code-Signing.cer",
+  "certificateSha256": "f790fdc69416ab498774854f46ca179a2fb8fe6c4c44f8e7fcb7d7d7037e3200",
+  "certificateThumbprintSha1": "54E4378450A3DB86C0D11E338FA30B0FD8C19A4B",
+  "notBefore": "2026-10-22T02:28:12.000Z",
+  "notAfter": "2036-10-19T02:28:12.000Z",
+  "selfSigned": true,
+  "keyAlgorithm": "RSA",
+  "keyBits": 3072,
+  "usage": "codeSigning"
+}
