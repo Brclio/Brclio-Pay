@@ -21,6 +21,7 @@ function Get-ExpectedWindowsSigningIdentity {
 }
 function Read-WindowsAuthenticodeEvidence {
   param([Parameter(Mandatory=$true)][string]$Path,[Parameter(Mandatory=$true)]$Expected,[Parameter(Mandatory=$true)][ValidateSet('UntrustedRoot','Valid')][string]$RequiredStatus)
+  Write-Host ((Get-Date).ToUniversalTime().ToString('o') + ' Begin native Authenticode: ' + [IO.Path]::GetFileName($Path) + '; required ' + $RequiredStatus)
   $signature = Get-AuthenticodeSignature -LiteralPath $Path
   # PowerShell maps CERT_E_UNTRUSTEDROOT to UnknownError; NotTrusted means explicit distrust.
   # Keep this strict: a missing/changed native DWORD field is an audit failure, not a fallback.
@@ -28,6 +29,7 @@ function Read-WindowsAuthenticodeEvidence {
   if ($null -eq $nativeField -or $nativeField.FieldType -ne [uint32]) { throw 'The native Authenticode trust result is unavailable.' }
   $rawStatus = [string]$signature.Status
   $rawCode = '0x{0:X8}' -f $nativeField.GetValue($signature)
+  Write-Host ((Get-Date).ToUniversalTime().ToString('o') + ' Native Authenticode result: ' + [IO.Path]::GetFileName($Path) + '; ' + $rawStatus + ' / ' + $rawCode)
   $expectedTrustState = if ($RequiredStatus -eq 'UntrustedRoot') { $rawStatus -ceq 'UnknownError' -and $rawCode -ceq '0x800B0109' } else { $rawStatus -ceq 'Valid' -and $rawCode -ceq '0x00000000' }
   if (-not $expectedTrustState -or $null -eq $signature.SignerCertificate) { throw "Unexpected Authenticode result for $([IO.Path]::GetFileName($Path)): $rawStatus / $rawCode / $($signature.StatusMessage)." }
   $certificate = $signature.SignerCertificate

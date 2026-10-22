@@ -1,68 +1,67 @@
-# Manual, read-only repository verification. Signing secrets are scoped to the provisioning step.
-# Private PFX/password live only in the runner's restricted temp directory/environment, never in artifacts.
-name: Verify Windows client
+# Diagnostic-only branch: never rebuilds, signs, loads private credentials, or publishes a release.
+name: Reverify pinned signed Windows installer
 on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 30
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: clients/desktop/package-lock.json
-      - name: Install desktop dependencies before loading signing credentials
-        run: npm ci --prefix clients/desktop
-      - name: Verify updater policies
-        run: node --test tests/client-desktop.test.mjs tests/client-android.test.mjs
-      - name: Read client version
-        id: settings
-        shell: pwsh
-        run: |
-          $settings = Get-Content -Raw clients/shared/release-settings.json | ConvertFrom-Json
-          if ($settings.version -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$' -or $settings.applicationId -ne 'cn.bornforthis.brcliopay') { throw 'Invalid shared client identity.' }
-          [IO.File]::AppendAllText($env:GITHUB_OUTPUT,"version=$($settings.version)`n")
-      - name: Download exact previously released unsigned installation seed
-        shell: pwsh
-        run: |
-          $directory = Join-Path $env:RUNNER_TEMP 'brcliopay-seed'
-          New-Item -ItemType Directory -Force -Path $directory | Out-Null
-          $seed = Join-Path $directory 'Brclio-Pay-1.0.0-windows-x64-setup.exe'
-          Invoke-WebRequest -Uri 'https://github.com/Brclio/Brclio-Pay/releases/download/client-v1.0.0/Brclio-Pay-1.0.0-windows-x64-setup.exe' -OutFile $seed
-          if ((Get-Item -LiteralPath $seed).Length -ne 111396777 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $seed).Hash.ToLowerInvariant() -cne '1656c5c3c622aca87f1427f62b6e800cdefbb23650c63e23ae500de1f176c588') { throw 'Published upgrade seed integrity mismatch.' }
-      - name: Provision pinned private signing identity in restricted temporary directory
+      - name: Verify original build source and artifact before extracting exact signed installer
         shell: pwsh
         env:
-          BRCLIO_WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.BRCLIO_WINDOWS_SIGNING_PFX_BASE64 }}
-          BRCLIO_WINDOWS_SIGNING_PASSWORD: ${{ secrets.BRCLIO_WINDOWS_SIGNING_PASSWORD }}
-        run: ./clients/scripts/prepare-windows-signing.ps1
-      - name: Build signed current installer, launcher and NSIS uninstaller
-        working-directory: clients/desktop
-        run: npx electron-builder --win --x64 --publish never
-      - name: Verify untrusted and current-user trust states plus native unsigned-to-signed upgrade
-        shell: pwsh
-        run: ./clients/scripts/verify-windows-client.ps1 -SeedInstaller "${{ runner.temp }}/brcliopay-seed/Brclio-Pay-1.0.0-windows-x64-setup.exe" -Installer "dist-clients/Brclio-Pay-${{ steps.settings.outputs.version }}-windows-x64-setup.exe" -OutputDirectory "artifacts/windows-native" -SeedVersion '1.0.0'
-      - name: Remove private signing material before uploading public artifacts
-        if: always()
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          $api='https://api.github.com/repos/Brclio/Brclio-Pay'
+          $run=Invoke-RestMethod -Uri "$api/actions/runs/39717039848" -Headers $headers
+          if ($run.head_sha -cne '1d5c981361ace4fe49931ad40934043e180d3ad7' -or $run.status -ne 'completed' -or $run.conclusion -ne 'cancelled') { throw 'Original build source or terminal state mismatch.' }
+          $jobs=(Invoke-RestMethod -Uri "$api/actions/runs/39717039848/jobs" -Headers $headers).jobs
+          $steps=@($jobs | ForEach-Object { $_.steps } | Where-Object { $_.name -eq 'Build signed current installer, launcher and NSIS uninstaller' -and $_.conclusion -eq 'success' })
+          if ($steps.Count -ne 1) { throw 'Original signed build did not succeed.' }
+          $artifact=Invoke-RestMethod -Uri "$api/actions/artifacts/12400106654" -Headers $headers
+          if ($artifact.id -ne 12400106654 -or $artifact.name -ne 'windows-client-verified' -or $artifact.expired -or $artifact.size_in_bytes -ne 111425186 -or $artifact.digest -cne 'sha256:e499d23204dd03be307ae5e50867f677f5486a592061a92edddaa153a092215c' -or $artifact.workflow_run.id -ne 39717039848 -or $artifact.workflow_run.head_sha -cne $run.head_sha) { throw 'Original artifact identity mismatch.' }
+          $archive=Join-Path $env:RUNNER_TEMP 'original-signed-windows.zip'
+          Invoke-WebRequest -Uri "$api/actions/artifacts/12400106654/zip" -Headers $headers -OutFile $archive
+          if ((Get-Item -LiteralPath $archive).Length -ne 111425186 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant() -cne 'e499d23204dd03be307ae5e50867f677f5486a592061a92edddaa153a092215c') { throw 'Original artifact archive checksum mismatch.' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip=[IO.Compression.ZipFile]::OpenRead($archive)
+          try {
+            $allowed=@('dist-clients/Brclio-Pay-1.0.1-windows-x64-setup.exe','artifacts/windows-native/windows-before-upgrade.json','artifacts/windows-native/windows-after-upgrade.json','artifacts/windows-native/windows-native-evidence.json','artifacts/windows-native/windows-signing-evidence.json')
+            $names=@($zip.Entries | ForEach-Object { $_.FullName })
+            if ($names.Count -ne @($names | Select-Object -Unique).Count -or @($names | Where-Object { $_ -cnotin $allowed }).Count -ne 0) { throw 'Unexpected original artifact entries.' }
+            $entry=$zip.GetEntry('dist-clients/Brclio-Pay-1.0.1-windows-x64-setup.exe')
+            if ($null -eq $entry -or $entry.Length -lt 100000000 -or $entry.Length -gt 150000000) { throw 'Exact original installer missing.' }
+            New-Item -ItemType Directory -Force -Path 'dist-clients','artifacts/windows-native' | Out-Null
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry,(Join-Path (Get-Location) 'dist-clients/Brclio-Pay-1.0.1-windows-x64-setup.exe'),$false)
+          } finally { $zip.Dispose() }
+          $installer='dist-clients/Brclio-Pay-1.0.1-windows-x64-setup.exe'
+          if ((Get-Item -LiteralPath $installer).Length -ne 111423264 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant() -cne 'd8227773e0689af5b1416dbb92c11091065bdc8fc670ada4e3aa65de72cd7986') { throw 'Original signed installer bytes mismatch.' }
+          [ordered]@{schema=1;applicationSourceRevision=$run.head_sha;verifierRevision=$env:GITHUB_SHA;originalBuildRun=$run.html_url;originalArtifactId='12400106654';originalArtifactSha256='e499d23204dd03be307ae5e50867f677f5486a592061a92edddaa153a092215c';installerSha256='d8227773e0689af5b1416dbb92c11091065bdc8fc670ada4e3aa65de72cd7986';rebuildPerformed=$false;privateSigningIdentityLoaded=$false} | ConvertTo-Json | Set-Content -Encoding utf8 artifacts/windows-native/windows-build-origin.json
+          Write-Host 'Pinned original source, archive, and signed installer bytes verified; no rebuild or signing.'
+      - name: Download exact published unsigned upgrade seed
         shell: pwsh
         run: |
-          $directory = Join-Path $env:RUNNER_TEMP 'brcliopay-windows-private-signing'
-          if (Test-Path -LiteralPath $directory) { Remove-Item -LiteralPath $directory -Recurse -Force }
-          [IO.File]::AppendAllText($env:GITHUB_ENV,"WIN_CSC_LINK=`nWIN_CSC_KEY_PASSWORD=`n")
-      - name: Upload only public signed installer and safe verification evidence
+          $directory=Join-Path $env:RUNNER_TEMP 'brcliopay-seed'
+          New-Item -ItemType Directory -Force -Path $directory | Out-Null
+          $seed=Join-Path $directory 'Brclio-Pay-1.0.0-windows-x64-setup.exe'
+          Invoke-WebRequest -Uri 'https://github.com/Brclio/Brclio-Pay/releases/download/client-v1.0.0/Brclio-Pay-1.0.0-windows-x64-setup.exe' -OutFile $seed
+          if ((Get-Item -LiteralPath $seed).Length -ne 111396777 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $seed).Hash.ToLowerInvariant() -cne '1656c5c3c622aca87f1427f62b6e800cdefbb23650c63e23ae500de1f176c588') { throw 'Published unsigned upgrade seed checksum mismatch.' }
+      - name: Reverify bounded native installation, live smoke, profile retention and strict trust transitions
+        shell: pwsh
+        run: ./clients/scripts/verify-windows-client.ps1 -SeedInstaller "${{ runner.temp }}/brcliopay-seed/Brclio-Pay-1.0.0-windows-x64-setup.exe" -Installer 'dist-clients/Brclio-Pay-1.0.1-windows-x64-setup.exe' -OutputDirectory 'artifacts/windows-native' -SeedVersion '1.0.0' -ApplicationSourceRevision '1d5c981361ace4fe49931ad40934043e180d3ad7' -OriginalBuildRun 'https://github.com/Brclio/Brclio-Pay/actions/runs/39717039848' -OriginalArtifactId '12400106654' -OriginalArtifactSha256 'e499d23204dd03be307ae5e50867f677f5486a592061a92edddaa153a092215c' -ExpectedInstallerSha256 'd8227773e0689af5b1416dbb92c11091065bdc8fc670ada4e3aa65de72cd7986'
+      - name: Upload exact original signed installer and public native evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-client-verified
+          name: windows-native-reverification
           path: |
-            dist-clients/Brclio-Pay-${{ steps.settings.outputs.version }}-windows-x64-setup.exe
+            dist-clients/Brclio-Pay-1.0.1-windows-x64-setup.exe
             artifacts/windows-native/*.json
           if-no-files-found: error
           retention-days: 7
