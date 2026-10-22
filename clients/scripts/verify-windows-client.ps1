@@ -38,23 +38,23 @@ foreach ($store in $stores) { if (Test-Path -LiteralPath (Join-Path $store $expe
 $addedStores = [System.Collections.Generic.List[string]]::new()
 $trustOperations = [System.Collections.Generic.List[object]]::new()
 
-# certutil -user targets the isolated runner account only; -f avoids a headless Root confirmation UI.
-# https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/certutil
+# Use the documented physical registry provider in a bounded child process, only in the isolated runner's CurrentUser stores.
+# https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore
 function Invoke-IsolatedUserTrust {
   param([ValidateSet('Root','TrustedPublisher')][string]$Store,[ValidateSet('addstore','delstore')][string]$Operation)
   Write-VerificationProgress ('Begin bounded CurrentUser certificate operation: ' + $Operation + ' ' + $Store)
   $info = [System.Diagnostics.ProcessStartInfo]::new()
-  $info.FileName = Join-Path $env:SystemRoot 'System32/certutil.exe'
+  $info.FileName = (Get-Process -Id $PID).Path
   $info.UseShellExecute = $false; $info.CreateNoWindow = $true; $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
-  foreach ($argument in @('-user','-f',('-' + $Operation),$Store)) { $info.ArgumentList.Add($argument) }
-  $target = if ($Operation -eq 'addstore') { $expected.CertificatePath } else { $expected.Identity.certificateThumbprintSha1 }
-  $info.ArgumentList.Add($target)
+  foreach ($argument in @('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $PSScriptRoot 'windows-user-certificate-store.ps1'),'-Store',$Store,'-Operation',$Operation)) { $info.ArgumentList.Add($argument) }
   $process = [System.Diagnostics.Process]::Start($info)
   try {
     $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
     if (-not $process.WaitForExit(30000)) { $process.Kill($true); throw 'CurrentUser certificate operation exceeded its 30 second process deadline.' }
-    $null = $stdout.GetAwaiter().GetResult(); $null = $stderr.GetAwaiter().GetResult()
+    $output = $stdout.GetAwaiter().GetResult(); $null = $stderr.GetAwaiter().GetResult()
     if ($process.ExitCode -ne 0) { throw ('CurrentUser certificate operation failed with exit code ' + $process.ExitCode + '.') }
+    $operationEvidence = $output | ConvertFrom-Json
+    if ($operationEvidence.schema -ne 1 -or $operationEvidence.scope -ne 'CurrentUser' -or $operationEvidence.provider -ne 'CERT_STORE_PROV_SYSTEM_REGISTRY_W' -or $operationEvidence.store -ne $Store -or $operationEvidence.operation -ne $Operation -or $operationEvidence.certificateSha256 -cne $expected.Identity.certificateSha256 -or $operationEvidence.unprotectedFlagUsed -ne $false -or $operationEvidence.globalTrustModified -ne $false) { throw 'Physical CurrentUser store operation provenance mismatch.' }
   } finally { $process.Dispose() }
   $location = 'Cert:\CurrentUser\' + $Store + '\' + $expected.Identity.certificateThumbprintSha1
   $present = Test-Path -LiteralPath $location
@@ -65,7 +65,7 @@ function Invoke-IsolatedUserTrust {
     if ($digest -cne $expected.Identity.certificateSha256 -or $stored.HasPrivateKey) { throw 'Isolated CurrentUser trust entry does not match the fixed public certificate.' }
   } elseif ($present) { throw 'Isolated CurrentUser certificate cleanup did not remove the fixed trust entry.' }
   Write-VerificationProgress ('Completed bounded CurrentUser certificate operation: ' + $Operation + ' ' + $Store)
-  return [pscustomobject]@{ scope='CurrentUser'; store=$Store; operation=$Operation; verified=$true; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
+  return [pscustomobject]@{ scope='CurrentUser'; provider='CERT_STORE_PROV_SYSTEM_REGISTRY_W'; store=$Store; operation=$Operation; verified=$true; deadlineSeconds=30; certificateSha256=$expected.Identity.certificateSha256 }
 }
 
 function Install-Package([string]$Path) {
@@ -149,15 +149,20 @@ try {
     scope='self-signed-authenticode-current-user-trust'; smartScreenBypassClaimed=$false
   }
 } finally {
+  $cleanupFailures = [System.Collections.Generic.List[string]]::new()
   foreach ($store in $addedStores) {
-    if (Test-Path -LiteralPath (Join-Path $store $expected.Identity.certificateThumbprintSha1)) {
+    try {
+      # Attempt deletion even when the logical chain view does not expose the physical entry.
       $trustOperations.Add((Invoke-IsolatedUserTrust -Store (Split-Path -Leaf $store) -Operation 'delstore'))
-    }
-    if (Test-Path -LiteralPath (Join-Path $store $expected.Identity.certificateThumbprintSha1)) { throw 'An isolated CurrentUser trust addition remains after verification.' }
+      if (Test-Path -LiteralPath (Join-Path $store $expected.Identity.certificateThumbprintSha1)) { throw 'An isolated CurrentUser trust addition remains after verification.' }
+    } catch { $cleanupFailures.Add((Split-Path -Leaf $store)) }
   }
+  if ($cleanupFailures.Count -gt 0) { throw ('Isolated CurrentUser trust cleanup failed: ' + ($cleanupFailures -join ', ')) }
 }
 $signingEvidence['currentUserTrustRemovedAfterVerification'] = $true
 $signingEvidence['trustStoresAbsentBeforeVerification'] = $true
+$signingEvidence['trustProviderDocumentation'] = 'https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore'
+$signingEvidence['unprotectedFlagUsed'] = $false
 $signingEvidence['trustStoreOperations'] = @($trustOperations)
 if ($OriginalBuildRun) {
   foreach ($record in @($evidence,$signingEvidence)) {
