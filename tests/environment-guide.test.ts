@@ -59,6 +59,11 @@ describe('administrator environment guide',()=>{
     const result=await environmentGuide({...env,GITHUB_REPOSITORY:'example/private-pay-data',GITHUB_BRANCH:'release/data'},store());
     expect(result.source).toMatchObject({repository:'example/private-pay-data',url:'https://github.com/example/private-pay-data/blob/release%2Fdata/maintenance/environment/guide.json'});
   });
+  it('identifies SQLite documentation and configuration without claiming a GitHub source',async()=>{
+    const result=await environmentGuide({...env,STORAGE_BACKEND:'sqlite'},store());
+    expect(result.source).toMatchObject({repository:'服务器 SQLite',url:null,path:ENVIRONMENT_GUIDE_PATH});
+    expect(result.storageTypeBasis).toBe('sqlite-runtime-config');
+  });
   it('observes an edited guide from storage without a code deployment or static fallback',async()=>{
     const storage=store(),first=await environmentGuide(env,storage),next={...guide(),title:'更新后的说明'};
     vi.mocked(storage.readJson).mockResolvedValue(next);const second=await environmentGuide(env,storage);
@@ -84,9 +89,9 @@ describe('administrator environment guide',()=>{
     for(const name of [...Object.keys(config.vars),...config.ratelimits.map((item:{name:string})=>item.name),config.assets.binding])expect(names).toContain(name);
     const result=await environmentGuide(env,store(seed));
     expect(result.variables.filter(item=>item.storageType==='binding').map(item=>item.name).sort())
-      .toEqual(['ASSETS','ADMIN_LOGIN_LIMITER','INTEGRATION_LIMITER','PAYMENT_API_LIMITER'].sort());
-    expect(result.variables.filter(item=>item.storageType==='runtime')).toHaveLength(33);
-    expect(result.variables.filter(item=>item.canReveal)).toHaveLength(33);
+      .toEqual(['ASSETS','STORAGE','ADMIN_LOGIN_LIMITER','INTEGRATION_LIMITER','PAYMENT_API_LIMITER'].sort());
+    expect(result.variables.filter(item=>item.storageType==='runtime')).toHaveLength(34);
+    expect(result.variables.filter(item=>item.canReveal)).toHaveLength(34);
     expect(result.variables.filter(item=>item.storageType==='binding').every(item=>!item.canReveal)).toBe(true);
     const envSource=readFileSync('src/types.ts','utf8').split('export interface Env {')[1].split('\n}')[0];
     for(const match of envSource.matchAll(/^  ([A-Z][A-Z0-9_]*)\??:/gm))expect(names).toContain(match[1]);

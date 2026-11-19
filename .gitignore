@@ -25,3 +25,7 @@ clients/ci-results/
 *.keystore
 public/docs/
 .DS_Store
+dist-server/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

@@ -79,7 +79,7 @@ describe('explicit owner environment value access',()=>{
     null,[],{},'CHECKOUT_SECRET',{name:123},{name:['CHECKOUT_SECRET']},
     {name:'CHECKOUT_SECRET',all:true},{names:['CHECKOUT_SECRET','GITHUB_TOKEN']},
     {name:'UNKNOWN_RUNTIME_BINDING'},{name:'__proto__'},{name:'constructor'},{name:'toString'},
-    ...['ASSETS','ADMIN_LOGIN_LIMITER','INTEGRATION_LIMITER','PAYMENT_API_LIMITER'].map(name=>({name})),
+    ...['ASSETS','STORAGE','ADMIN_LOGIN_LIMITER','INTEGRATION_LIMITER','PAYMENT_API_LIMITER'].map(name=>({name})),
   ])('rejects unreviewed names, resource bindings and bulk input: %j',async body=>{
     const f=fixture({...env,UNKNOWN_RUNTIME_BINDING:'synthetic-unknown'} as Env);
     await expect(f.call({body})).rejects.toMatchObject({status:400,code:'INVALID_ENVIRONMENT_VARIABLE'});f.assertIsolated();
@@ -106,9 +106,9 @@ describe('explicit owner environment value access',()=>{
   });
   it('supports every reviewed runtime variable in the maintained deployment guide',()=>{
     const seed=validateEnvironmentGuide(JSON.parse(readFileSync('resources/environment-guide.json','utf8')));
-    const bindings=new Set(['ASSETS','ADMIN_LOGIN_LIMITER','INTEGRATION_LIMITER','PAYMENT_API_LIMITER']);
+    const bindings=new Set(['ASSETS','STORAGE','ADMIN_LOGIN_LIMITER','INTEGRATION_LIMITER','PAYMENT_API_LIMITER']);
     const names=seed.groups.flatMap(group=>group.variables.map(variable=>variable.name)).filter(name=>!bindings.has(name));
-    expect(names).toHaveLength(33);
+    expect(names).toHaveLength(34);
     for(const name of names){
       const value=`synthetic-runtime:${name}\n`;
       expect(environmentValue({[name]:value} as unknown as Env,{name})).toMatchObject({name,configured:true,value});

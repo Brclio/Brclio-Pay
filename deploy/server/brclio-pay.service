@@ -1,0 +1,42 @@
+[Unit]
+Description=Brclio Pay local SQLite payment service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=brclio-pay
+Group=brclio-pay
+UMask=0077
+WorkingDirectory=/www/server/brclio-pay/current
+# Replace /usr/bin/node with the installed absolute Node.js 22.13+ executable.
+ExecStart=/usr/bin/node /www/server/brclio-pay/current/index.mjs
+Environment=NODE_ENV=production
+Environment=PORT=3187
+Environment=PAY_DATABASE_PATH=/www/server/brclio-pay/data/brclio-pay.sqlite
+Environment=SERVER_MAINTENANCE=true
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=120
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/www/server/brclio-pay/current
+ReadWritePaths=/www/server/brclio-pay/data /www/server/brclio-pay/backups
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=brclio-pay
+
+[Install]
+WantedBy=multi-user.target
