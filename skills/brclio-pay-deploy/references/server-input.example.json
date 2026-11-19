@@ -1,0 +1,21 @@
+{
+  "providerMode": "dual",
+  "baseUrl": "https://pay.example.com",
+  "admin": {"email": "admin@example.com"},
+  "alipay": {
+    "appId": "<your-alipay-app-id>",
+    "sellerId": "<your-alipay-seller-id>",
+    "privateKeyFile": "./merchant/alipay-app-private.pem",
+    "publicKeyFile": "./merchant/alipay-platform-public.pem",
+    "channels": ["page", "wap"]
+  },
+  "wechat": {
+    "merchantId": "<your-wechat-merchant-id>",
+    "appId": "<your-wechat-app-id>",
+    "serialNo": "<your-merchant-certificate-serial-number>",
+    "privateKeyFile": "./merchant/wechat-merchant-private.pem",
+    "apiV3KeyFile": "./merchant/wechat-api-v3-key.txt",
+    "publicKeyId": "PUB_KEY_ID_<your-wechat-pay-public-key-id>",
+    "publicKeyFile": "./merchant/wechat-pay-public.pem"
+  }
+}

@@ -1,6 +1,14 @@
 # 统一支付交付状态
 
-核验日期：2026-10-22（Asia/Shanghai）。
+服务器支持核验日期：2026-11-19（Asia/Shanghai）。此前版本记录保留各自原始核验日期。
+
+## 1.4.0 服务器 SQLite 部署支持
+
+- 项目支持两种独立部署：Cloudflare Workers + 私有 GitHub JSON，或 Node.js + 本机 SQLite。默认 Cloudflare 构建、原支付 API、支付验签与订单身份保持兼容。服务器构建不自动发布或修改 Cloudflare。
+- SQLite 保存订单、事件、索引、产品、授权、计划、审计、维护说明和运行配置；非业务原始文件独立归档。事务原子提交付款与 outbox，提供不可变报表快照、WAL 一致性备份及带版本校验的配置维护。
+- 新增服务器初始化、全量迁移审核/校验、恢复包、systemd/Nginx/备份模板及双部署 Skill。首次安装不需要 GitHub 或 Cloudflare，收款默认关闭。迁移工具对既有 Brclio 来源只读，拒绝覆盖已有数据库。
+- `npm run check`、付款及安全 Worker 运行时检查、服务器启动/请求排空、SQLite 并发事务与备份/迁移测试通过。测试和历史只读核对不代表新一轮真实付款或产品权益验收。
+- 原 Cloudflare + GitHub 专用版本固定为 [v1.3.0](https://github.com/Brclio/Brclio-Pay/releases/tag/v1.3.0)，源码提交 `3b5e6754fd71f34890b5ce156b4ba53b11100395`。该 Release 没有设为 Latest，避免改变客户端更新备用地址。服务器新增数据不会自动写回旧账本，回切前必须核对并同步差异。
 
 ## 1.3.0 管理员实值查看与自行部署
 

@@ -1,0 +1,27 @@
+[Unit]
+Description=Private verified online backup of Brclio Pay SQLite
+After=brclio-pay.service
+
+[Service]
+Type=oneshot
+User=brclio-pay
+Group=brclio-pay
+UMask=0077
+WorkingDirectory=/www/server/brclio-pay
+ExecStart=/bin/sh /www/server/brclio-pay/bin/backup-once.sh
+Environment=PAY_DATABASE_PATH=/www/server/brclio-pay/data/brclio-pay.sqlite
+Environment=PAY_BACKUP_DIR=/www/server/brclio-pay/backups
+Environment=PAY_BACKUP_TOOL=/www/server/brclio-pay/bin/backup-sqlite.py
+TimeoutStartSec=300
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/www/server/brclio-pay/data /www/server/brclio-pay/backups
+CapabilityBoundingSet=
+AmbientCapabilities=
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=brclio-pay-backup

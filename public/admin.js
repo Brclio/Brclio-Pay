@@ -74,6 +74,7 @@
   let billTotals = null;
   let environmentLoaded = false;
   let environmentGuide = null;
+  let environmentBackend = 'cloudflare';
   let environmentStatuses = new Map();
   let revealedEnvironmentValue = null;
   let pendingEnvironmentValue = null;
@@ -1190,7 +1191,9 @@
           : state?.storageType === 'binding' ? '资源绑定，无文本值'
           : publicEnvironmentNames.has(variable.name) && state?.disclosure === 'public' ? typeof state.value === 'string' && state.value.length ? state.value : '未设置（空值）'
           : state?.configured ? '已配置 · 点击下方按钮查看实际值' : '未配置';
-        const values = [['当前部署值', currentValue], ['维护方式', state?.storageType === 'binding' ? 'Cloudflare 资源绑定' : 'Cloudflare 服务端变量（Text / Secret，以控制台为准）'],
+        const values = [['当前部署值', currentValue], ['维护方式', environmentBackend === 'sqlite'
+          ? state?.storageType === 'binding' ? '服务器运行时组件' : '服务器 SQLite 配置（更新后重启服务生效）'
+          : state?.storageType === 'binding' ? 'Cloudflare 资源绑定' : 'Cloudflare 服务端变量（Text / Secret，以控制台为准）'],
           ['适用范围', variable.scope || (variable.required ? '该分组启用时必需' : '按使用场景配置')], ['如何生成或获取', variable.generation || variable.maintenance],
           ['配置位置', variable.location], ['修改与生效', variable.changeNotes], ['维护注意', variable.maintenance], ['格式示例', variable.example]];
         for (const [label, value] of values) {
@@ -1222,7 +1225,7 @@
     environmentLoaded = false; environmentGuide = null; environmentStatuses.clear();
     ui.environmentGroups.replaceChildren(); ui.environmentIntro.replaceChildren(); ui.environmentNotes.replaceChildren();
     ui.environmentSource.textContent = ''; ui.environmentCount.textContent = ''; ui.environmentEmpty.hidden = true;
-    message(ui.environmentMessage, '正在从私有数据仓库读取维护说明…');
+    message(ui.environmentMessage, '正在读取当前部署的维护说明…');
     try {
       const result = await request('/environment', { fresh }), guide = result.document;
       if (!guide || guide.schema !== 1 || typeof guide.title !== 'string' || !Number.isFinite(Date.parse(guide.updatedAt))
@@ -1234,6 +1237,7 @@
         for (const variable of group.variables) if (!variable || !['name', 'label', 'description', 'location', 'changeNotes', 'maintenance', 'example'].every((key) => typeof variable[key] === 'string')) throw new ApiError(502, 'INVALID_ENVIRONMENT_GUIDE', '环境变量条目不完整，请检查数据仓库说明。');
       }
       environmentGuide = guide;
+      environmentBackend = result.storageTypeBasis === 'sqlite-runtime-config' ? 'sqlite' : 'cloudflare';
       // The guide/cache never retains protected values. Only an explicit reveal
       // POST can populate the separately cleared temporary row.
       environmentStatuses = new Map(result.variables.filter((item) => item && typeof item.name === 'string' && typeof item.configured === 'boolean' && ['Text', 'runtime', 'binding'].includes(item.storageType))

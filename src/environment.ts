@@ -4,13 +4,14 @@ import type {Env,Store} from './types';
 
 export const ENVIRONMENT_GUIDE_PATH='maintenance/environment/guide.json';
 const REPOSITORY='BrclioData/BrclioPay-Data';
-const BINDING_NAMES=new Set(['ASSETS','ADMIN_LOGIN_LIMITER','INTEGRATION_LIMITER','PAYMENT_API_LIMITER']);
+const BINDING_NAMES=new Set(['ASSETS','STORAGE','ADMIN_LOGIN_LIMITER','INTEGRATION_LIMITER','PAYMENT_API_LIMITER']);
 // The cached guide GET includes only reviewed, non-credential values. Editable
 // documentation cannot expand this list; owner reveals use the separate POST.
 const PUBLIC_VALUE_NAMES=new Set([
   'PAY_BASE_URL','PAYMENT_MODE','PAYMENT_ENABLED','ALIPAY_CHANNELS','ALIPAY_APP_ID','ALIPAY_SELLER_ID','ALIPAY_GATEWAY',
   'WECHAT_MCH_ID','WECHAT_APP_ID','WECHAT_SERIAL_NO','WECHAT_PUBLIC_KEY_ID','WECHAT_CHANNELS',
   'GITHUB_APP_ID','GITHUB_APP_INSTALLATION_ID','GITHUB_REPOSITORY','GITHUB_BRANCH','REGISTRY_STORAGE_MODE','LEGACY_WECHAT_BASE_URL',
+  'STORAGE_BACKEND',
 ]);
 // The owner may explicitly reveal these deployed string bindings through the
 // authenticated POST route. Editable guide entries cannot extend this scope.
@@ -90,10 +91,10 @@ export async function environmentGuide(env:Env,store:Store) {
         ...(publicValue && typeof value==='string'?{value}:{}),
       };
     })),
-    source:{repository,path:ENVIRONMENT_GUIDE_PATH,
-      url:`https://github.com/${repository}/blob/${encodeURIComponent(branch)}/${ENVIRONMENT_GUIDE_PATH}`,
+    source:{repository:env.STORAGE_BACKEND==='sqlite'?'服务器 SQLite':repository,path:ENVIRONMENT_GUIDE_PATH,
+      url:env.STORAGE_BACKEND==='sqlite'?null:`https://github.com/${repository}/blob/${encodeURIComponent(branch)}/${ENVIRONMENT_GUIDE_PATH}`,
       revision:sha256(JSON.stringify(document))},
     // Runtime bindings cannot distinguish dashboard Text from Secret storage.
-    storageTypeBasis:'runtime-binding-only' as const,
+    storageTypeBasis:env.STORAGE_BACKEND==='sqlite'?'sqlite-runtime-config' as const:'runtime-binding-only' as const,
   };
 }

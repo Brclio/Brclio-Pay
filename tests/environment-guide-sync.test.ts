@@ -16,7 +16,7 @@ describe('reviewed environment guide updates',()=>{
     const github={snapshot:vi.fn(async()=>({revision:'a'.repeat(40),tree:'b'.repeat(40),files:[{path:'maintenance/environment/guide.json',sha:'c'.repeat(40)}]})),
       bytes:vi.fn(async()=>Buffer.from(JSON.stringify(previous))),request:vi.fn()};
     const result=await synchronizeEnvironmentGuide(github,current);
-    expect(result).toMatchObject({operation:'update',variableCount:37,applied:false});
+    expect(result).toMatchObject({operation:'update',variableCount:39,applied:false});
     expect(github.request).not.toHaveBeenCalled();
     await expect(synchronizeEnvironmentGuide(github,current,{apply:true,expectedHead:'d'.repeat(40),expectedDigest:result.documentDigest}))
       .rejects.toThrow('EXPECTED_HEAD_MISMATCH_NO_WRITE');

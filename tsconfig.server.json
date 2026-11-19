@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "server/**/*.ts", "tests/server-runtime.test.ts", "tests/sqlite-store.test.ts"]
+}

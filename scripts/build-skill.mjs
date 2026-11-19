@@ -23,7 +23,7 @@ const deploymentVariant = 'brclio-pay-deploy';
 const deploymentDirectory = path.join(root, 'skills', deploymentVariant);
 await mkdir(path.join(deploymentDirectory, 'references'), { recursive: true });
 const deploymentNames = ['SKILL.md', 'agents/openai.yaml'];
-const bundledDocs = new Set(['deployment', 'environment-variables', 'merchant-setup']);
+const bundledDocs = new Set(['deployment', 'server-deployment', 'environment-variables', 'merchant-setup']);
 for (const name of bundledDocs) {
   let source = await readFile(path.join(root, 'docs', `${name}.md`), 'utf8');
   source = source.replace(/\]\(\.\.\/examples\/deployment\/([^)]*)\)/g, ']($1)')
@@ -33,7 +33,7 @@ for (const name of bundledDocs) {
   await writeFile(path.join(deploymentDirectory, target), source);
   deploymentNames.push(target);
 }
-for (const name of ['setup-input.example.json', 'setup-alipay.example.json', 'setup-wechat.example.json']) {
+for (const name of ['setup-input.example.json', 'setup-alipay.example.json', 'setup-wechat.example.json', 'server-input.example.json']) {
   const target = `references/${name}`;
   await writeFile(path.join(deploymentDirectory, target), await readFile(path.join(root, 'examples/deployment', name)));
   deploymentNames.push(target);

@@ -1,6 +1,9 @@
 export type PaymentProvider = 'alipay' | 'wechat';
 export interface Env {
   ASSETS: Fetcher;
+  /** Server-only physical document store. Cloudflare continues using GitHub. */
+  STORAGE?: Store;
+  STORAGE_BACKEND?: 'sqlite';
   PAY_BASE_URL: string;
   PAYMENT_MODE: 'live' | 'sandbox';
   PAYMENT_ENABLED: string;

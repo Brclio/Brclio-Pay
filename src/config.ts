@@ -56,9 +56,13 @@ export function configurationReady(env: Env): boolean {
   // An empty registry is valid for a fresh deployment; product onboarding is separate.
   clients(env);
   const selected=(['alipay','wechat'] as const).filter(provider=>paymentChannels(env,provider).length>0);
-  return [(env.GITHUB_TOKEN || (env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY)),env.GITHUB_REPOSITORY,env.CHECKOUT_SECRET].every(Boolean)
+  return storageConfigured(env) && !!env.CHECKOUT_SECRET
     && env.CHECKOUT_SECRET.length >= 32 && selected.length>0
     && selected.every(provider=>providerConfigured(env,provider));
+}
+function storageConfigured(env:Env):boolean {
+  if(env.STORAGE_BACKEND==='sqlite')return !!env.STORAGE;
+  return !!((env.GITHUB_TOKEN || (env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY)) && env.GITHUB_REPOSITORY);
 }
 /** Empty channel bindings deliberately disable new purchases for that provider. */
 export function paymentChannels(env:Env,provider:PaymentProvider):string[] {
@@ -74,7 +78,7 @@ export function providerConfigured(env:Env,provider:PaymentProvider):boolean {
 /** Historical records and durable fulfillment remain usable with all new-purchase channels disabled. */
 export function requireInfrastructureReady(env:Env):void {
   clients(env);
-  requireThat((env.GITHUB_TOKEN || (env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY))&&env.GITHUB_REPOSITORY&&env.CHECKOUT_SECRET?.length>=32,503,'NOT_READY','支付服务尚未完成配置');
+  requireThat(storageConfigured(env)&&env.CHECKOUT_SECRET?.length>=32,503,'NOT_READY','支付服务尚未完成配置');
   const base = httpsUrl(env.PAY_BASE_URL);
   requireThat(base.pathname === '/' && !base.search,503,'CONFIGURATION','支付域名配置无效');
   requireThat(['live','sandbox'].includes(env.PAYMENT_MODE),503,'CONFIGURATION','支付环境配置无效');

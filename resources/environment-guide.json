@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "title": "运行环境变量维护说明",
-  "updatedAt": "2026-10-22T06:54:00.000Z",
+  "updatedAt": "2026-11-19T14:45:00.000Z",
   "intro": [
     "本页列出运行参数的用途、当前值、适用渠道和生成方式。公开参数在登录后显示当前值；私钥、签名密钥、产品配置与管理员认证材料默认隐藏，管理员点击单项查看按钮后，才从当前 Worker 的运行绑定读取实际部署值。",
     "现有生产 Worker 为 brclio-pay-unified，其运行参数按既有约定保留 Cloudflare Text；新独立部署使用普通变量加 Secret。运行时无法判断 Text / Secret 存储类型，请到 Cloudflare 控制台核对。ASSETS 与限流器是资源绑定。",
@@ -537,6 +537,39 @@
           "maintenance": "保持现有绑定名称及专用 namespace_id。限流错误一般等待一个窗口后重试同一业务订单。",
           "generation": "由 Wrangler ratelimits 配置创建支付 API 限流绑定，默认每 60 秒 120 次。",
           "scope": "所有部署必需。"
+        }
+      ]
+    },
+    {
+      "id": "server-storage",
+      "title": "服务器 SQLite 存储",
+      "description": "自建服务器模式的本地数据库与运行配置；Cloudflare 模式继续使用私有 GitHub 仓库。",
+      "variables": [
+        {
+          "name": "STORAGE_BACKEND",
+          "label": "存储后端",
+          "description": "服务器启动时固定选择 sqlite。Cloudflare 不设置此项，继续使用原 GitHub 存储。",
+          "required": false,
+          "sensitive": false,
+          "example": "sqlite（仅服务器）",
+          "location": "服务器 SQLite runtime_config 与启动程序。",
+          "changeNotes": "仅表示所选部署架构；修改文本不会迁移数据。缺少 SQLite 存储时服务拒绝启动，不回退 GitHub。",
+          "maintenance": "迁移前验证全部记录、商户配置和签名材料，再切换入口。",
+          "generation": "setup-server.mjs 与服务器入口自动设置。",
+          "scope": "服务器部署。"
+        },
+        {
+          "name": "STORAGE",
+          "label": "服务器存储对象",
+          "description": "运行时注入的本地 SQLite 文档存储对象，负责原子事务、快照和持久配置；不是可填写或查看的字符串。",
+          "required": false,
+          "sensitive": false,
+          "example": "<服务器资源绑定；不是文本>",
+          "location": "服务器入口 server/index.ts。",
+          "changeNotes": "由启动程序绑定数据库；不得在配置中填入同名文本值。",
+          "maintenance": "数据库和备份位于受保护目录，不能放进静态网站或源码仓库。",
+          "generation": "服务器启动时打开 SQLite 数据库并注入。",
+          "scope": "服务器部署。"
         }
       ]
     }

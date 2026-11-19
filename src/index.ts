@@ -3,7 +3,7 @@ import {createAlipay} from './alipay';
 import {authenticate,authenticateCheckout,authenticateHeaders,checkoutToken} from './auth';
 import {clients,HttpError,paymentChannels,providerConfigured,requireInfrastructureReady,requireReady,requireThat} from './config';
 import {Payments} from './payments';
-import type {Env,PaymentProvider,ProductClient} from './types';
+import type {Env,PaymentProvider,ProductClient,Store} from './types';
 import {handleAdmin} from './admin';
 import {handleIntegration} from './integration';
 import {Registry} from './registry';
@@ -39,7 +39,14 @@ function parseJson(raw:string):unknown {try{return JSON.parse(raw);}catch{throw 
 function findClient(env:Env,id:string):ProductClient {const c=clients(env).find(c=>c.id===id);requireThat(c,503,'CLIENT_UNAVAILABLE','产品暂不可用');return c;}
 let cached:{env:Env;payments:Payments}|undefined;
 let cachedStore:{key:string;store:PartitionedStore}|undefined;
+const localStores=new WeakMap<Store,PartitionedStore>();
 function storeFor(env:Env):PartitionedStore {
+  if(env.STORAGE_BACKEND==='sqlite'){
+    requireThat(env.STORAGE,503,'NOT_READY','支付存储尚未完成配置');
+    let store=localStores.get(env.STORAGE);
+    if(!store){store=new PartitionedStore(env.STORAGE);localStores.set(env.STORAGE,store);}
+    return store;
+  }
   const key=sha256(JSON.stringify([env.GITHUB_TOKEN,env.GITHUB_APP_ID,env.GITHUB_APP_PRIVATE_KEY,env.GITHUB_APP_INSTALLATION_ID,env.GITHUB_REPOSITORY,env.GITHUB_BRANCH]));
   if(cachedStore?.key===key)return cachedStore.store;
   const app=env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY ? new GitHubApp({appId:env.GITHUB_APP_ID,privateKey:env.GITHUB_APP_PRIVATE_KEY,repository:env.GITHUB_REPOSITORY,installationId:env.GITHUB_APP_INSTALLATION_ID}):undefined;
@@ -50,7 +57,7 @@ async function runtimeEnv(env:Env,store?:import('./types').Store):Promise<Env> {
   const registered=await new Registry(env,store || storeFor(env)).resolveClients();
   return {...env,CLIENTS_JSON:JSON.stringify(registered)};
 }
-let healthCache:{key:string;until:number;value:Record<string,unknown>}|undefined;
+let healthCache:{key:string;store?:Store;until:number;value:Record<string,unknown>}|undefined;
 export function service(env:Env):Payments {
   if(cached?.env===env)return cached.payments;
   const adapters=paymentAdapters(env);
@@ -93,8 +100,8 @@ export async function handle(request:Request,env:Env,ctx:ExecutionContext,provid
       return secure(new Response(request.method==='HEAD'?null:skillMatch[2]==='.zip'?skillZip(variant) as BodyInit:skillMarkdown(variant),{headers:{'Content-Type':skillMatch[2]==='.zip'?'application/zip':'text/markdown;charset=utf-8',...(skillMatch[2]==='.zip'?{'Content-Disposition':`attachment; filename="${variant}.zip"`}:{})}}));
     }
     if (request.method==='GET' && path==='/api/health') {
-      const key=hmacSha256(env.CHECKOUT_SECRET || 'unconfigured',JSON.stringify([env.PAY_BASE_URL,env.PAYMENT_MODE,env.GITHUB_TOKEN,env.GITHUB_APP_ID,env.GITHUB_APP_PRIVATE_KEY,env.GITHUB_APP_INSTALLATION_ID,env.GITHUB_REPOSITORY,env.GITHUB_BRANCH,env.PAYMENT_ENABLED,env.CLIENTS_JSON,env.REGISTRY_ENCRYPTION_KEY,env.REGISTRY_STORAGE_MODE,env.ALIPAY_CHANNELS,env.ALIPAY_APP_ID,env.ALIPAY_SELLER_ID,env.ALIPAY_PRIVATE_KEY,env.ALIPAY_PUBLIC_KEY,env.ALIPAY_GATEWAY,env.WECHAT_CHANNELS,env.WECHAT_MCH_ID,env.WECHAT_APP_ID,env.WECHAT_SERIAL_NO,env.WECHAT_PRIVATE_KEY,env.WECHAT_API_V3_KEY,env.WECHAT_PUBLIC_KEYS_JSON,env.WECHAT_PUBLIC_KEY_ID]));
-      if(!provided&&healthCache?.key===key && healthCache.until>Date.now())return secure(json(healthCache.value));
+      const key=hmacSha256(env.CHECKOUT_SECRET || 'unconfigured',JSON.stringify([env.STORAGE_BACKEND,env.PAY_BASE_URL,env.PAYMENT_MODE,env.GITHUB_TOKEN,env.GITHUB_APP_ID,env.GITHUB_APP_PRIVATE_KEY,env.GITHUB_APP_INSTALLATION_ID,env.GITHUB_REPOSITORY,env.GITHUB_BRANCH,env.PAYMENT_ENABLED,env.CLIENTS_JSON,env.REGISTRY_ENCRYPTION_KEY,env.REGISTRY_STORAGE_MODE,env.ALIPAY_CHANNELS,env.ALIPAY_APP_ID,env.ALIPAY_SELLER_ID,env.ALIPAY_PRIVATE_KEY,env.ALIPAY_PUBLIC_KEY,env.ALIPAY_GATEWAY,env.WECHAT_CHANNELS,env.WECHAT_MCH_ID,env.WECHAT_APP_ID,env.WECHAT_SERIAL_NO,env.WECHAT_PRIVATE_KEY,env.WECHAT_API_V3_KEY,env.WECHAT_PUBLIC_KEYS_JSON,env.WECHAT_PUBLIC_KEY_ID]));
+      if(!provided&&healthCache?.key===key && healthCache.store===env.STORAGE && healthCache.until>Date.now())return secure(json(healthCache.value));
       const providerHealth=(provider:PaymentProvider)=>{
         const channels=paymentChannels(env,provider),selected=channels.length>0;let configured=false;
         try{if(providerConfigured(env,provider)){if(provider==='alipay')createAlipay(env);else createWechat(env);configured=true;}}catch{/* report availability only */}
@@ -102,8 +109,8 @@ export async function handle(request:Request,env:Env,ctx:ExecutionContext,provid
       };
       const providers={alipay:providerHealth('alipay'),wechat:providerHealth('wechat')};
       let ready=false;try{const effective=await runtimeEnv(env,provided?.store);requireReady(effective,false);ready=Object.values(providers).every(provider=>!provider.selected||provider.configured);}catch{/* report availability only */}
-      const value={service:'Brclio Pay',version:'1.3.0',ready,acceptingPayments:ready && env.PAYMENT_ENABLED==='true',mode:env.PAYMENT_MODE || 'live',providers,storage:'github-private-plaintext'};
-      if(!provided)healthCache={key,until:Date.now()+15000,value};return secure(json(value));
+      const value={service:'Brclio Pay',version:'1.4.0',ready,acceptingPayments:ready && env.PAYMENT_ENABLED==='true',mode:env.PAYMENT_MODE || 'live',providers,storage:env.STORAGE_BACKEND==='sqlite'?'sqlite-local':'github-private-plaintext'};
+      if(!provided)healthCache={key,store:env.STORAGE,until:Date.now()+15000,value};return secure(json(value));
     }
     if(path.startsWith('/api/admin/'))return secure(await handleAdmin(request,env,provided?.store || storeFor(env),{
       service:async()=>{

@@ -1,8 +1,15 @@
 # 自行部署与现网维护
 
-本项目提供两条路径：首次部署自己的支付中心，或维护现有 Brclio 生产服务。首次部署使用 `setup:deployment` 生成独立配置，不修改仓库中既有生产账号、Worker、Pages 项目或 DNS。完整变量用途、生成方式与展示规则见 [环境变量说明](environment-variables.md)。
+先选择部署方式，再选择支付宝 / 微信渠道。Cloudflare 方式保持原有 `setup:deployment` 流程，使用 Workers、可选 Pages 和私有 GitHub 数据仓库；服务器 / 宝塔方式使用 `setup:server`，业务记录与全部运行参数保存在本地 SQLite，运行时不需要 GitHub 或 Cloudflare。两种方式不自动同步数据，切换时使用明确的迁移计划。完整变量用途、生成方式与展示规则见 [环境变量说明](environment-variables.md)。
 
-## 首次部署：准备事项
+| 部署方式 | 首次安装入口 | 持久存储 | 维护说明 |
+| --- | --- | --- | --- |
+| Cloudflare Workers（原有方式） | `npm run setup:deployment` | 私有 GitHub 仓库，Cloudflare 服务端变量 | 本文后续 Cloudflare 步骤 |
+| 自有服务器 / 宝塔 | `npm run setup:server` | 服务器本地 SQLite：业务、运行配置、说明与迁移来源 | [服务器部署与迁移](server-deployment.md) |
+
+首次安装均默认关闭收款，不修改既有生产部署或 DNS。既有服务迁移必须保留原始凭据，不能使用新安装工具生成替代密钥。本文中的 Cloudflare 命令仍按原方式执行，不会部署到服务器。
+
+## Cloudflare 首次部署：准备事项
 
 选择 `providerMode=dual`（支付宝 + 微信）、`alipay`（仅支付宝）或 `wechat`（仅微信）。初始化工具生成正式环境配置，默认关闭收款；只准备所选渠道的正式商户资料，内部签名密钥、管理员认证参数由工具生成。支付宝沙箱使用独立测试部署，不与正式商户配置混用。
 
@@ -18,12 +25,14 @@
 
 商户资料取得步骤见 [商户配置准备](merchant-setup.md)。商户凭据不能代替 Cloudflare 登录、GitHub 仓库访问或 App 安装授权。公开源码与文档不包含实际运行凭据；部署者登录自己的后台后，可查看公开配置的当前值，并通过单项查看按钮读取默认隐藏的私密部署值。
 
-## 人工部署
+## Cloudflare 人工部署
 
 在项目根目录安装依赖并完成检查：
 
 ```sh
 npm ci
+node scripts/sync-docs.mjs
+node scripts/build-skill.mjs
 npm run check
 npm run test:runtime
 npm run test:security-runtime
@@ -66,7 +75,7 @@ curl -fsSI https://YOUR_PAY_HOST/api/skills/brclio-pay-deploy.zip
 
 独立部署 Skill 为 [brclio-pay-deploy](../SKILL.md)，公开下载路径为 `/api/skills/brclio-pay-deploy.zip`。它负责部署支付中心，与三个产品接入 Skill 分工不同；产品受限接入令牌不能用于部署基础设施。
 
-把下列任务交给已获准访问目标源码和部署环境的 AI，并提供本机文件路径：
+部署 Skill 同时包含 Cloudflare 与服务器两套流程。把下列任务交给已获准访问目标源码和部署环境的 AI，并提供本机文件路径。Cloudflare 示例：
 
 ```text
 使用 skills/brclio-pay-deploy/SKILL.md 为我首次部署自己的 Brclio Pay。
@@ -77,11 +86,22 @@ curl -fsSI https://YOUR_PAY_HOST/api/skills/brclio-pay-deploy.zip
 我会在浏览器中完成必要的 Cloudflare / GitHub 授权。不要在对话、日志、公开页面或提交中展示凭据。
 ```
 
-AI 应读取包内参考资料，在源码根目录运行工具；缺少基础设施授权时说明准确缺项，不索取全账号凭证或虚构成功。只授权准备配置时，完成可审阅计划后停止；已授权部署时，继续应用并核对结果。最终分别报告自动化检查、Worker 版本、域名状态及真实支付/履约验收状态。
+服务器 / 宝塔示例：
 
-## 既有 Brclio 生产服务发布
+```text
+使用 skills/brclio-pay-deploy/SKILL.md 为我首次部署自己的 Brclio Pay。
+部署方式：自有服务器 / 宝塔，业务数据与运行参数使用本地 SQLite。
+支付范围：dual（可改为 alipay 或 wechat）。
+本机配置输入：secrets/server-input.json；只准备所选渠道的商户文件。
+使用已授权服务器及域名；不创建 GitHub 业务数据仓库，不改动已有 Cloudflare 部署。
+先生成并核对 SQLite 初始化结果，再按本次授权部署；保留 PAYMENT_ENABLED=false。
+```
 
-目标账号 `cacceff607775c81f667b7a951d4639f`，统一 Worker `brclio-pay-unified`。现有域名 `pay.bornforthis.cn` 使用 Pages 项目 `brclio-pay-aiyuechuang` 的服务绑定；保留现有外部 DNS，不修改根域名 nameserver。
+AI 应读取包内参考资料，在源码根目录运行工具；缺少基础设施授权时说明准确缺项，不索取全账号凭证或虚构成功。只授权准备配置时，完成可审阅计划后停止；已授权部署时，继续应用并核对结果。最终分别报告自动化检查、所选运行环境的版本、域名状态及真实支付/履约验收状态。
+
+## 既有 Brclio Cloudflare 环境维护
+
+以下是既有 Cloudflare 环境的维护目标，不代表域名当前一定指向该环境。目标账号 `cacceff607775c81f667b7a951d4639f`，统一 Worker `brclio-pay-unified`，Pages 项目 `brclio-pay-aiyuechuang` 通过服务绑定访问该 Worker。实际域名解析需独立检查；保留其他解析，不修改根域名 nameserver。服务器迁移按 [专门流程](server-deployment.md) 处理，不运行下述命令更新服务器。
 
 ### 发布顺序
 
@@ -99,7 +119,7 @@ AI 应读取包内参考资料，在源码根目录运行工具；缺少基础�
 
 分别记录：代码检查、迁移完整性、Worker部署版本、Pages入口部署、域名HTTPS、真实预下单/查单/关单、真实到账、产品权益开通。只有用户实际支付并在业务系统确认权益后，才可声称完整资金履约链路验收。
 
-微信兼容入口 `paywc.bornforthis.cn` 的 Pages 项目 `brclio-wechatpay` 同样绑定统一 Worker；执行 `npm run deploy:wechat-gateway` 更新。旧请求、checkout token和通知协议通过适配层使用同一新账本；不要直接恢复旧微信服务造成分叉。
+Cloudflare 中微信兼容入口 `paywc.bornforthis.cn` 对应的 Pages 项目 `brclio-wechatpay` 同样绑定统一 Worker；执行 `npm run deploy:wechat-gateway` 更新。旧请求、checkout token和通知协议通过适配层使用同一新账本；不要直接恢复旧微信服务造成分叉。
 
 源码仓库为 `Brclio/Brclio-Pay`。发布使用本机已授权的 Cloudflare CLI，运行 `npm run deploy:all` 更新统一 Worker 与两个 Pages 入口。当前 GitHub OAuth 授权不含 workflow 权限，因此没有配置 GitHub Actions 自动部署，也不在源码仓库存放闲置部署 Token。日常 Worker 脚本不携带任何运行变量值；保持全部控制台 Text 配置。不要绕过脚本直接发布带显式 `vars` 的默认配置。
 
